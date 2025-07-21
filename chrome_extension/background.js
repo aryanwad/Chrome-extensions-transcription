@@ -203,40 +203,60 @@ class TranscriptionService {
         
         if (typ === "Begin") {
           console.log('SESSION_BEGIN:', data.id);
+          console.log('🎤 READY FOR AUDIO - Session started, speak into your tab audio!');
         } else if (typ === "Turn") {
           const text = data.transcript || "";
           const isFinal = data.turn_is_formatted || false;
           
-          console.log(isFinal ? 'FINAL_TRANSCRIPT:' : 'PARTIAL_TRANSCRIPT:', text);
+          // CONSOLE DEBUG: Print all transcripts
+          console.log('🎯 TRANSCRIPT RECEIVED:');
+          console.log('   Type:', isFinal ? '🟢 FINAL' : '🟡 PARTIAL');
+          console.log('   Text:', `"${text}"`);
+          console.log('   Length:', text.length);
+          console.log('   Raw data:', data);
+          
+          // Force show overlay even without checking tabs
+          this.forceShowOverlay(text, isFinal);
           
           // Always update UI with latest transcript
           chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
             if (tabs[0]) {
+              console.log('📤 SENDING to content script:', { text, isFinal, tabId: tabs[0].id });
               chrome.tabs.sendMessage(tabs[0].id, {
                 type: 'NEW_TRANSCRIPT',
                 text: text,
                 isFinal: isFinal
               }, (response) => {
                 if (chrome.runtime.lastError) {
-                  console.warn('Could not send transcript to content script:', chrome.runtime.lastError.message);
+                  console.error('❌ FAILED to send transcript to content script:', chrome.runtime.lastError.message);
+                } else {
+                  console.log('✅ SENT transcript to content script:', response);
                 }
               });
+            } else {
+              console.error('❌ NO ACTIVE TAB FOUND for transcript delivery');
             }
           });
           
           // Only save to full transcript when fully formatted
           if (isFinal && text.trim()) {
             this.transcript += (this.transcript ? ' ' : '') + text;
-            console.log('SAVED_TO_TRANSCRIPT:', text);
-            console.log('FULL_TRANSCRIPT_LENGTH:', this.transcript.length);
+            console.log('💾 SAVED_TO_TRANSCRIPT:', text);
+            console.log('📊 FULL_TRANSCRIPT_LENGTH:', this.transcript.length);
           }
         } else if (typ === "Termination") {
           const duration = data.audio_duration_seconds || 0;
-          console.log('SESSION_END:', `Session ended after ${duration.toFixed(2)}s`);
+          console.log('⏹ SESSION_END:', `Session ended after ${duration.toFixed(2)}s`);
         } else {
-          console.log('WEBSOCKET_OTHER:', typ, data);
+          console.log('🔍 WEBSOCKET_OTHER:', typ, data);
         }
       };
+      
+      // Add a test message sender
+      setTimeout(() => {
+        console.log('🧪 TEST: Forcing a test transcript display...');
+        this.forceShowOverlay('Test transcript - if you see this, the overlay system works!', false);
+      }, 3000);
       
       this.websocket.onerror = (error) => {
         console.error('🔴 WebSocket error:', error);
@@ -250,6 +270,26 @@ class TranscriptionService {
     });
   }
   
+  
+  forceShowOverlay(text, isFinal) {
+    console.log('🎨 FORCE_OVERLAY:', { text, isFinal });
+    
+    // Get all tabs and try to send to all of them
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'NEW_TRANSCRIPT',
+          text: text,
+          isFinal: isFinal,
+          forceShow: true
+        }, (response) => {
+          if (!chrome.runtime.lastError) {
+            console.log(`✅ SENT transcript to tab ${tab.id}:`, response);
+          }
+        });
+      });
+    });
+  }
   
   stopTranscription() {
     if (this.websocket) {

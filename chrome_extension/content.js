@@ -17,12 +17,20 @@ class TranscriptionOverlay {
     if (window.location.protocol === 'chrome-extension:' || 
         window.location.protocol === 'chrome:' ||
         window.location.hostname === 'chrome.google.com') {
+      console.log('❌ SKIPPING overlay init on:', window.location.href);
       return;
     }
     
     this.createOverlay();
     this.setupMessageListener();
-    console.log('🎤 Live Transcription overlay initialized');
+    console.log('🎤 Live Transcription overlay initialized on:', window.location.href);
+    
+    // Test the overlay immediately
+    setTimeout(() => {
+      console.log('🧪 TESTING overlay display...');
+      this.show();
+      this.updateCaption('🧪 Test: Overlay system is working!', false);
+    }, 2000);
   }
   
   createOverlay() {
@@ -58,18 +66,19 @@ class TranscriptionOverlay {
   
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      console.log('Content script received message:', request);
+      console.log('🎭 CONTENT SCRIPT received message:', request);
       
       switch (request.type) {
         case 'TRANSCRIPTION_STARTED':
-          console.log('DEBUG_OVERLAY: Transcription started - showing overlay');
+          console.log('🟢 TRANSCRIPTION_STARTED - showing overlay');
           this.isTranscribing = true;
           this.show();
           this.updateCaption('🟢 Transcription started...', false);
-          console.log('DEBUG_OVERLAY: Overlay should now be visible');
+          console.log('✅ Overlay should now be visible');
           break;
           
         case 'TRANSCRIPTION_STATUS':
+          console.log('📊 TRANSCRIPTION_STATUS:', request.isRunning);
           this.isTranscribing = request.isRunning;
           if (request.isRunning) {
             this.show();
@@ -77,20 +86,32 @@ class TranscriptionOverlay {
           break;
           
         case 'NEW_TRANSCRIPT':
+          console.log('🎯 NEW_TRANSCRIPT received:');
+          console.log('   Text:', `"${request.text}"`);
+          console.log('   isFinal:', request.isFinal);
+          console.log('   forceShow:', request.forceShow);
+          
+          // Always show overlay when we get transcript
+          this.show();
+          
           if (request.isFinal) {
+            console.log('💚 Displaying FINAL transcript:', request.text);
             this.updateCaption(request.text, true);
           } else {
+            console.log('💛 Displaying PARTIAL transcript:', request.text);
             this.updateCaption(request.text, false);
           }
           break;
           
         case 'TRANSCRIPTION_STOPPED':
+          console.log('🔴 TRANSCRIPTION_STOPPED');
           this.isTranscribing = false;
           this.updateCaption('🔴 Transcription stopped', false);
           setTimeout(() => this.hide(), 2000);
           break;
           
         case 'AUDIO_CAPTURE_ERROR':
+          console.log('❌ AUDIO_CAPTURE_ERROR:', request.error);
           this.isTranscribing = false;
           this.updateCaption('❌ ' + request.error, false);
           if (request.error.includes('Share audio')) {
@@ -101,23 +122,37 @@ class TranscriptionOverlay {
           break;
           
         case 'PING':
-          // Respond to ping to confirm content script is loaded
+          console.log('🏓 PING received');
           break;
       }
       
-      sendResponse({success: true});
+      console.log('📤 Content script responding with success');
+      sendResponse({success: true, received: request.type});
     });
   }
   
   updateCaption(text, isFinal) {
-    if (!this.captionBox) return;
+    console.log('🎨 UPDATE_CAPTION called:', { text, isFinal, hasBox: !!this.captionBox });
+    
+    if (!this.captionBox) {
+      console.error('❌ captionBox is null! Cannot update caption');
+      return;
+    }
     
     const captionText = this.captionBox.querySelector('.lt-caption-text');
     const captionStatus = this.captionBox.querySelector('.lt-caption-status');
     
+    if (!captionText || !captionStatus) {
+      console.error('❌ Caption elements not found:', { captionText: !!captionText, captionStatus: !!captionStatus });
+      return;
+    }
+    
     if (text && text.trim()) {
+      console.log('✏️ Updating caption with text:', text);
+      
       // Create animated text display with word highlighting
       if (isFinal) {
+        console.log('💚 Rendering FINAL transcript');
         // Final transcript - show with completion animation
         captionText.innerHTML = `<span class="lt-final-text">${this.escapeHtml(text)}</span>`;
         captionStatus.textContent = 'Final';
@@ -131,6 +166,7 @@ class TranscriptionOverlay {
         }, 300);
         
       } else {
+        console.log('💛 Rendering PARTIAL transcript');
         // Partial transcript - show with typing effect
         const words = text.split(' ');
         const wordsHtml = words.map((word, index) => {
@@ -145,6 +181,10 @@ class TranscriptionOverlay {
       
       // Auto-resize overlay based on content
       this.resizeOverlay();
+      
+      console.log('✅ Caption updated successfully');
+    } else {
+      console.warn('⚠️ Empty or whitespace-only text provided:', `"${text}"`);
     }
   }
   
@@ -187,41 +227,43 @@ class TranscriptionOverlay {
   }
   
   show() {
-    console.log('DEBUG_OVERLAY: show() called, overlayContainer:', this.overlayContainer);
+    console.log('🎨 SHOW() called, overlayContainer exists:', !!this.overlayContainer);
     if (this.overlayContainer) {
-      // Force all styles with CSS text for maximum override
+      // SUPER aggressive styling to force visibility
       this.overlayContainer.style.cssText = `
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
         z-index: 2147483647 !important;
         position: fixed !important;
-        top: 20px !important;
-        right: 20px !important;
-        width: auto !important;
-        max-width: 80vw !important;
-        min-width: 300px !important;
-        background: linear-gradient(135deg, rgba(0, 0, 0, 0.95), rgba(20, 20, 40, 0.95)) !important;
+        top: 50px !important;
+        right: 50px !important;
+        width: 400px !important;
+        height: auto !important;
+        background: rgba(255, 0, 0, 0.9) !important;
         color: white !important;
         padding: 20px !important;
+        border: 3px solid lime !important;
         border-radius: 12px !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        backdrop-filter: blur(10px) !important;
-        font-family: 'Segoe UI', Arial, sans-serif !important;
-        font-size: 16px !important;
+        font-family: monospace !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
         line-height: 1.4 !important;
         pointer-events: auto !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 0 20px rgba(255, 0, 0, 0.8) !important;
         flex-direction: column !important;
         gap: 12px !important;
+        transform: none !important;
+        clip: auto !important;
+        clip-path: none !important;
+        overflow: visible !important;
       `;
       
       // Add CSS animations if not already added
       if (!document.getElementById('lt-animations')) {
         const style = document.createElement('style');
         style.id = 'lt-animations';
-        style.textContent = \`
+        style.textContent = `
           @keyframes ltFlashComplete {
             0% { background-color: rgba(76, 175, 80, 0.3); }
             100% { background-color: transparent; }
@@ -263,7 +305,7 @@ class TranscriptionOverlay {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.6; }
           }
-        \`;
+        `;
         document.head.appendChild(style);
       }
       this.isVisible = true;

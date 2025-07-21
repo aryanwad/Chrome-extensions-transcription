@@ -45,15 +45,18 @@ class AudioProcessor extends AudioWorkletProcessor {
         
         // Convert Float32Array to Int16Array for AssemblyAI
         const int16Array = new Int16Array(chunk.length);
+        let maxAmplitude = 0;
         for (let i = 0; i < chunk.length; i++) {
           // Clamp and convert to 16-bit integer
           int16Array[i] = Math.max(-32768, Math.min(32767, chunk[i] * 32767));
+          maxAmplitude = Math.max(maxAmplitude, Math.abs(int16Array[i]));
         }
         
-        // Send audio data to main thread
+        // Send audio data to main thread with amplitude info
         this.port.postMessage({
           type: 'AUDIO_DATA',
-          data: int16Array
+          data: int16Array,
+          amplitude: maxAmplitude
         });
       }
     }

@@ -75,6 +75,17 @@ class AudioCapture {
       
       console.log(`STEP_5: Stream info - Audio tracks: ${audioTracks.length}, Video tracks: ${videoTracks.length}`);
       
+      // Detailed audio track info
+      audioTracks.forEach((track, index) => {
+        console.log(`🎵 Audio Track ${index}:`, {
+          label: track.label,
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState,
+          settings: track.getSettings()
+        });
+      });
+      
       if (audioTracks.length === 0) {
         throw new Error('ERROR_NO_AUDIO_TRACK: No audio track in the stream. Make sure to check "Share audio" when selecting the tab.');
       }
@@ -100,7 +111,15 @@ class AudioCapture {
         if (!this.isCapturing) return;
         
         if (event.data.type === 'AUDIO_DATA') {
-          console.log('AUDIO_WORKLET: Received', event.data.data.length, 'audio samples from worklet');
+          const amplitude = event.data.amplitude || 0;
+          const hasAudio = amplitude > 100; // Threshold for detecting actual audio
+          
+          if (hasAudio) {
+            console.log('🎵 AUDIO_WORKLET: Active audio detected! Amplitude:', amplitude, 'samples:', event.data.data.length);
+          } else {
+            console.log('🔇 AUDIO_WORKLET: Silent/low audio, amplitude:', amplitude);
+          }
+          
           // Send audio data to background script
           chrome.runtime.sendMessage({
             type: 'AUDIO_DATA',
