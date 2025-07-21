@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Transcription Assistant</title>
+  <style>
+    body {
+      width: 350px;
+      min-height: 400px;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .header {
+      padding: 20px;
+      text-align: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    
+    .header p {
+      margin: 5px 0 0 0;
+      opacity: 0.8;
+      font-size: 14px;
+    }
+    
+    .content {
+      padding: 20px;
+    }
+    
+    .section {
+      margin-bottom: 25px;
+    }
+    
+    .section h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    
+    input[type="text"]::placeholder, input[type="password"]::placeholder {
+      color: rgba(255, 255, 255, 0.6);
+    }
+    
+    input[type="text"]:focus, input[type="password"]:focus {
+      outline: none;
+      border-color: rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 10px;
+    }
+    
+    .btn-primary {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    
+    .btn-primary:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+    
+    .btn-success {
+      background: #10b981;
+      color: white;
+    }
+    
+    .btn-success:hover {
+      background: #059669;
+      transform: translateY(-1px);
+    }
+    
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #dc2626;
+      transform: translateY(-1px);
+    }
+    
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .status {
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+    
+    .status.success {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    
+    .status.error {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    
+    .status.warning {
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+    
+    .divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.1);
+      margin: 20px 0;
+    }
+    
+    .small-text {
+      font-size: 12px;
+      opacity: 0.8;
+      line-height: 1.4;
+    }
+    
+    .link {
+      color: rgba(255, 255, 255, 0.8);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    
+    .link:hover {
+      color: white;
+    }
+    
+    .hidden {
+      display: none;
+    }
+    
+    .loading {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top: 2px solid white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎤 Live Transcription</h1>
+    <p>AI-powered real-time captions</p>
+  </div>
+  
+  <div class="content">
+    <!-- Setup Section -->
+    <div id="setup-section" class="section">
+      <h3>⚙️ Setup</h3>
+      <div class="form-group">
+        <label for="assemblyai-key">AssemblyAI API Key</label>
+        <input type="password" id="assemblyai-key" placeholder="Enter your AssemblyAI API key">
+      </div>
+      <div class="form-group">
+        <label for="openai-key">OpenAI API Key</label>
+        <input type="password" id="openai-key" placeholder="Enter your OpenAI API key">
+      </div>
+      <button id="save-keys" class="btn btn-primary">Save API Keys</button>
+      <div class="small-text">
+        <p>Need API keys? Get them from:</p>
+        <p><span class="link" data-url="https://www.assemblyai.com/dashboard">AssemblyAI Dashboard</span></p>
+        <p><span class="link" data-url="https://platform.openai.com/api-keys">OpenAI API Keys</span></p>
+      </div>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <!-- Control Section -->
+    <div id="control-section" class="section">
+      <h3>🎬 Transcription</h3>
+      <div id="status-display" class="status hidden"></div>
+      <button id="start-transcription" class="btn btn-success">Start Transcription</button>
+      <button id="stop-transcription" class="btn btn-danger hidden">Stop Transcription</button>
+      <div class="small-text">
+        <p>1. Make sure this tab has audio playing (YouTube, Twitch, etc.)</p>
+        <p>2. ⚠️ <strong>IMPORTANT:</strong> Check "Share audio" when Chrome asks what to share!</p>
+      </div>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <!-- Info Section -->
+    <div class="section">
+      <h3>ℹ️ How it works</h3>
+      <div class="small-text">
+        <p>1. Enter your API keys above</p>
+        <p>2. Navigate to a page with audio/video</p>
+        <p>3. Click "Start Transcription"</p>
+        <p>4. ⚠️ <strong>Check "Share audio"</strong> in Chrome dialog</p>
+        <p>5. Captions will appear as an overlay</p>
+        <p>6. Use the "Ask Agent" button for AI assistance</p>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

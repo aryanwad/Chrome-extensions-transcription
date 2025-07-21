@@ -1,0 +1,25 @@
+# Configuration files with sensitive data
+config.py
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated transcript files
+full_transcript.txt
+
+# Environment files
+.env
+.venv
+env/
+venv/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
