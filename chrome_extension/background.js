@@ -9,6 +9,9 @@ class TranscriptionService {
     this.openAiApiKey = null;
     this.transcript = '';
     this.keysLoaded = false;
+    this.currentTranscriptionTabId = null;
+    this.capturedStream = null;
+    this.audioProcessor = null;
     
     // Load API keys from storage
     this.loadApiKeys().then(() => {
@@ -96,15 +99,17 @@ class TranscriptionService {
     }
   }
   
-  async startTranscription(tabId) {
+  async startTranscription(tabId, streamId) {
     if (this.isTranscribing) {
-      console.log('Transcription already running');
+      console.log('BG: Transcription already running');
       return;
     }
     
+    console.log('BG: Starting transcription for tab:', tabId, 'with stream ID:', streamId);
+    
     // Wait for API keys to be loaded
     if (!this.keysLoaded) {
-      console.log('WAIT: Waiting for API keys to load...');
+      console.log('BG: Waiting for API keys to load...');
       await this.loadApiKeys();
       this.keysLoaded = true;
     }
@@ -114,53 +119,64 @@ class TranscriptionService {
     }
     
     try {
-      // First, ensure content scripts are injected
+      // Set the current tab as transcription target
+      this.currentTranscriptionTabId = tabId;
+      console.log('BG: Set transcription target tab to:', tabId);
+      
+      // Step 1: Ensure content scripts are injected
       console.log('BG_STEP_1: Injecting content scripts...');
       await this.ensureContentScriptsInjected(tabId);
       
-      // Connect to AssemblyAI
+      // Step 2: Connect to AssemblyAI WebSocket
       console.log('BG_STEP_2: Connecting to AssemblyAI...');
       await this.connectToAssemblyAI();
       
-      // Request audio capture from content script
-      console.log('BG_STEP_3: Requesting audio capture from content script...');
+      // Step 3: Set up offscreen document for audio processing (content scripts can't use tabCapture)
+      console.log('BG_STEP_3: Setting up offscreen document with AudioWorklet...');
+      await this.setupOffscreenDocument();
       
-      const response = await new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, {
-          type: 'START_AUDIO_CAPTURE'
+      // Step 4: Start audio capture in offscreen document with stream ID
+      console.log('BG_STEP_4: Starting offscreen audio capture with AudioWorklet...');
+      
+      const captureResponse = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          type: 'START_OFFSCREEN_CAPTURE',
+          streamId: streamId
         }, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('BG_ERROR: Failed to send message to content script:', chrome.runtime.lastError);
-            reject(new Error('Content script not available: ' + chrome.runtime.lastError.message));
+            console.error('BG: Error communicating with offscreen document:', chrome.runtime.lastError);
+            reject(new Error('Failed to communicate with offscreen document: ' + chrome.runtime.lastError.message));
             return;
           }
-          console.log('BG_STEP_4: Got response from content script:', response);
+          console.log('BG: Received response from offscreen document:', response);
           resolve(response);
         });
       });
       
-      if (!response || !response.success) {
-        const errorMsg = response?.error || 'Failed to start audio capture';
-        
-        // Send error to content script for display
-        chrome.tabs.sendMessage(tabId, {
-          type: 'AUDIO_CAPTURE_ERROR',
-          error: errorMsg
-        });
-        
-        throw new Error(errorMsg);
+      if (!captureResponse.success) {
+        throw new Error('Offscreen capture failed: ' + (captureResponse.error || 'Unknown error'));
       }
       
-      this.isTranscribing = true;
-      console.log('✅ Transcription started');
+      console.log('BG: Offscreen capture started successfully');
       
-      // Notify content script
+      this.isTranscribing = true;
+      console.log('✅ BG: Transcription started successfully');
+      
+      // Notify content script that transcription has started
       chrome.tabs.sendMessage(tabId, {
         type: 'TRANSCRIPTION_STARTED'
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn('BG: Could not notify content script of transcription start:', chrome.runtime.lastError.message);
+        } else {
+          console.log('BG: Content script notified of transcription start');
+        }
       });
       
     } catch (error) {
-      console.error('Failed to start transcription:', error);
+      console.error('BG: Failed to start transcription:', error);
+      // Clean up on error
+      this.stopTranscription();
       throw error;
     }
   }
@@ -172,15 +188,15 @@ class TranscriptionService {
       throw new Error('ERROR_NO_ASSEMBLYAI_KEY: AssemblyAI API key not found');
     }
     
-    // Try token-based authentication (if supported by v3 API)
+    // Use AssemblyAI v3 streaming API endpoint
     const params = new URLSearchParams({
       sample_rate: 16000,
       format_turns: true,
-      token: this.assemblyAiApiKey  // Try passing API key as token parameter
+      token: this.assemblyAiApiKey
     });
     const wsUrl = `wss://streaming.assemblyai.com/v3/ws?${params.toString()}`;
     
-    console.log('WEBSOCKET_STEP_2: Connecting to:', wsUrl.replace(this.assemblyAiApiKey, '[API_KEY_HIDDEN]'));
+    console.log('WEBSOCKET_STEP_2: Connecting to v3 endpoint:', wsUrl);
     
     return new Promise((resolve, reject) => {
       try {
@@ -192,63 +208,60 @@ class TranscriptionService {
       }
       
       this.websocket.onopen = () => {
-        console.log('🟢 WebSocket connected to AssemblyAI v3 (token auth)');
-        resolve();
+        console.log('🟢 WebSocket connected to AssemblyAI v3 streaming');
+        
+        // For v3 API, authentication is done via the token parameter in URL
+        // No additional authentication message needed
+        console.log('🔐 Connected with token authentication via URL parameters');
+        resolve(); // Resolve immediately as connection is authenticated
       };
       
       this.websocket.onmessage = (event) => {
         console.log('WEBSOCKET_MESSAGE: Received from AssemblyAI:', event.data);
         const data = JSON.parse(event.data);
-        const typ = data.type;
+        const messageType = data.type;
         
-        if (typ === "Begin") {
-          console.log('SESSION_BEGIN:', data.id);
+        // Log all message types for debugging
+        console.log('WEBSOCKET_MESSAGE_TYPE:', messageType, 'Full data:', data);
+        
+        if (messageType === "Begin") {
+          console.log('SESSION_BEGIN:', data.session_id);
           console.log('🎤 READY FOR AUDIO - Session started, speak into your tab audio!');
-        } else if (typ === "Turn") {
+          // Don't resolve here for v3, wait for actual transcripts
+        } else if (messageType === "Turn") {
+          // v3 API sends Turn messages with transcripts
           const text = data.transcript || "";
-          const isFinal = data.turn_is_formatted || false;
+          const isFinal = data.end_of_turn || false;
           
-          // CONSOLE DEBUG: Print all transcripts
-          console.log('🎯 TRANSCRIPT RECEIVED:');
-          console.log('   Type:', isFinal ? '🟢 FINAL' : '🟡 PARTIAL');
+          console.log(`🎯 ${isFinal ? 'FINAL' : 'PARTIAL'} TRANSCRIPT RECEIVED:`);
           console.log('   Text:', `"${text}"`);
           console.log('   Length:', text.length);
-          console.log('   Raw data:', data);
+          console.log('   isFinal:', isFinal);
+          console.log('   end_of_turn_confidence:', data.end_of_turn_confidence);
           
-          // Force show overlay even without checking tabs
-          this.forceShowOverlay(text, isFinal);
-          
-          // Always update UI with latest transcript
-          chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-            if (tabs[0]) {
-              console.log('📤 SENDING to content script:', { text, isFinal, tabId: tabs[0].id });
-              chrome.tabs.sendMessage(tabs[0].id, {
-                type: 'NEW_TRANSCRIPT',
-                text: text,
-                isFinal: isFinal
-              }, (response) => {
-                if (chrome.runtime.lastError) {
-                  console.error('❌ FAILED to send transcript to content script:', chrome.runtime.lastError.message);
-                } else {
-                  console.log('✅ SENT transcript to content script:', response);
-                }
-              });
-            } else {
-              console.error('❌ NO ACTIVE TAB FOUND for transcript delivery');
+          if (text.trim()) {
+            // Force show overlay for transcript
+            this.forceShowOverlay(text, isFinal);
+            
+            // Send transcript using helper method
+            this.sendTranscriptToTab(text, isFinal);
+            
+            // Save to full transcript if final
+            if (isFinal) {
+              this.transcript += (this.transcript ? ' ' : '') + text;
+              console.log('💾 SAVED_TO_TRANSCRIPT:', text);
+              console.log('📊 FULL_TRANSCRIPT_LENGTH:', this.transcript.length);
             }
-          });
-          
-          // Only save to full transcript when fully formatted
-          if (isFinal && text.trim()) {
-            this.transcript += (this.transcript ? ' ' : '') + text;
-            console.log('💾 SAVED_TO_TRANSCRIPT:', text);
-            console.log('📊 FULL_TRANSCRIPT_LENGTH:', this.transcript.length);
           }
-        } else if (typ === "Termination") {
-          const duration = data.audio_duration_seconds || 0;
-          console.log('⏹ SESSION_END:', `Session ended after ${duration.toFixed(2)}s`);
+        } else if (messageType === "End") {
+          console.log('⏹ SESSION_END: Session terminated');
         } else {
-          console.log('🔍 WEBSOCKET_OTHER:', typ, data);
+          console.log('🔍 WEBSOCKET_OTHER:', messageType, data);
+          
+          // Check if this is an error message
+          if (data.error || data.message) {
+            console.error('🚨 ASSEMBLYAI_ERROR:', data);
+          }
         }
       };
       
@@ -271,12 +284,81 @@ class TranscriptionService {
   }
   
   
+  sendTranscriptToTab(text, isFinal) {
+    // Send transcript to the tab being transcribed (not the active tab)
+    if (this.currentTranscriptionTabId) {
+      console.log('📤 SENDING to transcription tab:', { text, isFinal, tabId: this.currentTranscriptionTabId });
+      chrome.tabs.sendMessage(this.currentTranscriptionTabId, {
+        type: 'NEW_TRANSCRIPT',
+        text: text,
+        isFinal: isFinal
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('❌ FAILED to send transcript to transcription tab:', chrome.runtime.lastError.message);
+        } else {
+          console.log('✅ SENT transcript to transcription tab:', response);
+        }
+      });
+    } else {
+      // Fallback to active tab (old behavior)
+      chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+        if (tabs[0]) {
+          console.log('📤 SENDING to active tab (fallback):', { text, isFinal, tabId: tabs[0].id });
+          chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'NEW_TRANSCRIPT',
+            text: text,
+            isFinal: isFinal
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.error('❌ FAILED to send transcript to content script:', chrome.runtime.lastError.message);
+            } else {
+              console.log('✅ SENT transcript to content script:', response);
+            }
+          });
+        }
+      });
+    }
+  }
+
   forceShowOverlay(text, isFinal) {
     console.log('🎨 FORCE_OVERLAY:', { text, isFinal });
     
-    // Get all tabs and try to send to all of them
+    // First try to send to the tracked transcription tab
+    if (this.currentTranscriptionTabId) {
+      chrome.tabs.sendMessage(this.currentTranscriptionTabId, {
+        type: 'NEW_TRANSCRIPT',
+        text: text,
+        isFinal: isFinal,
+        forceShow: true
+      }, (response) => {
+        if (!chrome.runtime.lastError) {
+          console.log(`✅ SENT transcript to tracked tab ${this.currentTranscriptionTabId}:`, response);
+        } else {
+          console.log(`❌ Failed to send to tracked tab, trying all tabs...`);
+          this.sendToAllTabs(text, isFinal);
+        }
+      });
+    } else {
+      // Fallback: send to all tabs
+      this.sendToAllTabs(text, isFinal);
+    }
+  }
+  
+  sendToAllTabs(text, isFinal) {
     chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(tab => {
+      // Prioritize media tabs (YouTube, etc.)
+      const mediaTabs = tabs.filter(tab => 
+        tab.url && (
+          tab.url.includes('youtube.com') || 
+          tab.url.includes('netflix.com') || 
+          tab.url.includes('twitch.tv') ||
+          tab.audible
+        )
+      );
+      
+      const targetTabs = mediaTabs.length > 0 ? mediaTabs : tabs;
+      
+      targetTabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, {
           type: 'NEW_TRANSCRIPT',
           text: text,
@@ -284,31 +366,103 @@ class TranscriptionService {
           forceShow: true
         }, (response) => {
           if (!chrome.runtime.lastError) {
-            console.log(`✅ SENT transcript to tab ${tab.id}:`, response);
+            console.log(`✅ SENT transcript to tab ${tab.id} (${tab.url || 'unknown'}):`, response);
           }
         });
       });
     });
   }
   
+  
+  
+  async setupOffscreenDocument() {
+    console.log('BG: Setting up offscreen document...');
+    
+    // Check if offscreen document already exists
+    const hasDocument = await chrome.offscreen.hasDocument?.();
+    console.log('BG: Offscreen document exists?', hasDocument);
+    
+    if (hasDocument) {
+      console.log('BG: Using existing offscreen document');
+      return;
+    }
+    
+    console.log('BG: Creating new offscreen document...');
+    
+    try {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['USER_MEDIA'],
+        justification: 'Processing tab audio for real-time transcription with AudioWorklet'
+      });
+      console.log('✅ BG: Offscreen document created successfully');
+      
+      // Wait a moment for offscreen document to initialize
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+    } catch (error) {
+      console.error('❌ BG: Failed to create offscreen document:', error);
+      throw error;
+    }
+  }
+  
   stopTranscription() {
+    console.log('🛑 BG: Stopping all transcription services...');
+    
+    // Close WebSocket connection
     if (this.websocket) {
+      console.log('🔌 BG: Closing WebSocket connection...');
       this.websocket.close();
       this.websocket = null;
     }
     
+    // Audio capture is now stopped by content script directly
+    
+    // Clean up any legacy audio processing
+    if (this.audioProcessor) {
+      console.log('🎵 BG: Disconnecting legacy audio processor...');
+      this.audioProcessor.disconnect();
+      this.audioProcessor = null;
+    }
+    
+    if (this.capturedStream) {
+      console.log('📹 BG: Stopping captured stream tracks...');
+      this.capturedStream.getTracks().forEach(track => track.stop());
+      this.capturedStream = null;
+    }
+    
     if (this.mediaStream) {
+      console.log('🎤 BG: Stopping media stream tracks...');
       this.mediaStream.getTracks().forEach(track => track.stop());
       this.mediaStream = null;
     }
     
     if (this.audioContext) {
+      console.log('🔊 BG: Closing audio context...');
       this.audioContext.close();
       this.audioContext = null;
     }
     
+    // Clear transcription state
     this.isTranscribing = false;
-    console.log('🛑 Transcription stopped');
+    this.currentTranscriptionTabId = null;
+    this.audioChunkCount = 0;
+    
+    // Notify all content scripts that transcription stopped
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'TRANSCRIPTION_STOPPED'
+        }, () => {
+          // Ignore errors for tabs that don't have content scripts
+          if (chrome.runtime.lastError) {
+            // Silent ignore - many tabs won't have our content script
+          }
+        });
+      });
+    });
+    
+    console.log('✅ BG: All transcription services stopped successfully');
   }
   
   async askAiQuestion(question) {
@@ -358,22 +512,43 @@ const transcriptionService = new TranscriptionService();
 
 // Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Background received message:', request);
+  console.log('BG: Received message:', request.type, 'from:', sender.tab?.id || 'popup');
   
   switch (request.type) {
     case 'START_TRANSCRIPTION':
-      chrome.tabs.query({active: true, currentWindow: true}, async (tabs) => {
+      console.log('BG: 🚀 START_TRANSCRIPTION received with streamId:', request.streamId, 'tabId:', request.tabId);
+      (async () => {
         try {
-          await transcriptionService.startTranscription(tabs[0].id);
+          await transcriptionService.startTranscription(request.tabId, request.streamId);
+          console.log('BG: ✅ Transcription started successfully, sending success response');
           sendResponse({success: true});
         } catch (error) {
+          console.error('BG: ❌ Transcription start failed:', error);
           sendResponse({success: false, error: error.message});
         }
-      });
+      })();
       return true; // Keep message channel open for async response
       
     case 'STOP_TRANSCRIPTION':
+      console.log('📨 STOP_TRANSCRIPTION message received from:', sender.tab?.id || 'popup');
+      
+      // Stop all transcription services
       transcriptionService.stopTranscription();
+      
+      // Send stop message to content scripts to stop their audio capture
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'STOP_AUDIO_CAPTURE'
+          }, () => {
+            // Ignore errors for tabs that don't have content scripts
+            if (chrome.runtime.lastError) {
+              // Silent ignore
+            }
+          });
+        });
+      });
+      
       sendResponse({success: true});
       break;
       
@@ -392,22 +567,68 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({success: true, transcript: transcriptionService.transcript});
       break;
       
-    case 'AUDIO_DATA':
-      // Forward audio data to AssemblyAI WebSocket
+    case 'AUDIO_DATA_FROM_OFFSCREEN':
+      // Forward audio data from offscreen document (AudioWorklet) to AssemblyAI WebSocket
       if (transcriptionService.websocket?.readyState === WebSocket.OPEN) {
-        // Convert array back to Int16Array
-        const int16Array = new Int16Array(request.data);
-        transcriptionService.websocket.send(int16Array.buffer);
-        console.log('AUDIO_SENT: Sent', int16Array.length, 'audio samples to AssemblyAI');
+        try {
+          // Convert array back to Int16Array for AssemblyAI
+          const int16Array = new Int16Array(request.data);
+          
+          // Send as binary data (ArrayBuffer) to AssemblyAI
+          transcriptionService.websocket.send(int16Array.buffer);
+          
+          // Track audio activity for debugging
+          transcriptionService.audioChunkCount = (transcriptionService.audioChunkCount || 0) + 1;
+          
+          // Log audio activity periodically to avoid spam
+          if (request.amplitude > 100) {
+            if (transcriptionService.audioChunkCount % 20 === 0) { // Log every 20th active chunk
+              console.log('🎵 BG_AUDIO: Sent to AssemblyAI - chunk:', transcriptionService.audioChunkCount, 
+                         'amplitude:', request.amplitude, 'samples:', int16Array.length, 
+                         'sampleRate:', request.sampleRate);
+            }
+          } else if (transcriptionService.audioChunkCount % 100 === 0) { // Log every 100th silent chunk
+            console.log('🔇 BG_AUDIO: Silent chunk sent - total chunks:', transcriptionService.audioChunkCount);
+          }
+          
+        } catch (error) {
+          console.error('❌ BG_AUDIO: Error processing audio data:', error);
+        }
       } else {
-        console.warn('AUDIO_DROPPED: WebSocket not open, state:', 
+        console.warn('❌ BG_AUDIO: WebSocket not open, dropping audio data. State:', 
           transcriptionService.websocket?.readyState || 'null');
       }
       sendResponse({success: true});
       break;
       
+      
+      
+    case 'SET_TRANSCRIPTION_SOURCE':
+      console.log('📍 SET_TRANSCRIPTION_SOURCE:', request.sourceInfo);
+      // Try to find the tab being captured based on the video track label
+      chrome.tabs.query({}, (tabs) => {
+        // Look for media tabs that might be the source
+        const mediaTabs = tabs.filter(tab => 
+          tab.url.includes('youtube.com') || 
+          tab.url.includes('netflix.com') || 
+          tab.url.includes('twitch.tv') ||
+          tab.audible ||
+          (request.sourceInfo.label && request.sourceInfo.label.includes(tab.title))
+        );
+        
+        if (mediaTabs.length > 0) {
+          // Use the first media tab as transcription target
+          transcriptionService.currentTranscriptionTabId = mediaTabs[0].id;
+          console.log('🎯 SET transcription target tab:', mediaTabs[0].id, 'URL:', mediaTabs[0].url);
+        }
+      });
+      sendResponse({success: true});
+      break;
+      
     case 'AUDIO_CAPTURE_STOPPED':
       transcriptionService.isTranscribing = false;
+      transcriptionService.currentTranscriptionTabId = null; // Clear target
+      
       chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs[0]) {
           chrome.tabs.sendMessage(tabs[0].id, {
@@ -434,4 +655,14 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-console.log('🎤 Live Transcription Assistant background service loaded');
+// Service worker startup
+console.log('🎤 BG: Live Transcription Assistant background service loaded at:', new Date().toISOString());
+
+// Handle service worker errors
+self.addEventListener('error', (event) => {
+  console.error('BG: Service worker error:', event.error);
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  console.error('BG: Unhandled promise rejection:', event.reason);
+});

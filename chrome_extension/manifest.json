@@ -10,7 +10,8 @@
     "storage",
     "scripting",
     "desktopCapture",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "offscreen"
   ],
   
   "host_permissions": [

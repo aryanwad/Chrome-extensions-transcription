@@ -124,7 +124,7 @@ class PopupController {
       this.elements.startTranscription.disabled = true;
       this.elements.startTranscription.innerHTML = '<span class="loading"></span>Starting...';
       
-      // Check if current tab has audio
+      // Check if current tab is valid for transcription
       const tabs = await chrome.tabs.query({active: true, currentWindow: true});
       const currentTab = tabs[0];
       
@@ -133,23 +133,135 @@ class PopupController {
         return;
       }
       
-      // Send start transcription message
+      // Show helpful message for media tabs
+      const isMediaTab = currentTab.url.includes('youtube.com') || 
+                        currentTab.url.includes('netflix.com') ||
+                        currentTab.url.includes('twitch.tv') ||
+                        currentTab.url.includes('vimeo.com') ||
+                        currentTab.audible;
+      
+      if (isMediaTab) {
+        this.showStatus('🎵 Ready to transcribe this media tab!', 'info');
+      } else {
+        this.showStatus('📄 Ready to transcribe this tab (make sure it has audio)', 'info');
+      }
+      
+      // Test if content script is available
+      console.log('POPUP: Testing content script availability...');
+      const pingResponse = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(currentTab.id, { type: 'PING' }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('POPUP: Content script PING failed:', chrome.runtime.lastError);
+            resolve(null);
+          } else {
+            console.log('POPUP: Content script PING successful:', response);
+            resolve(response);
+          }
+        });
+      });
+      
+      if (!pingResponse) {
+        console.warn('POPUP: Content script not responding, may need injection...');
+        // Try to inject content scripts manually
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: currentTab.id },
+            files: ['content.js', 'content-audio.js']
+          });
+          await chrome.scripting.insertCSS({
+            target: { tabId: currentTab.id },
+            files: ['overlay.css']
+          });
+          console.log('POPUP: Content scripts injected manually');
+          
+          // Wait a moment for scripts to initialize
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (injectionError) {
+          console.error('POPUP: Failed to inject content scripts:', injectionError);
+          throw new Error('Content scripts could not be loaded: ' + injectionError.message);
+        }
+      }
+      
+      // Get tab capture stream ID in popup context (required for user interaction)
+      console.log('POPUP: Getting tab capture stream ID for tab:', currentTab.id);
+      
+      let streamId;
+      try {
+        streamId = await new Promise((resolve, reject) => {
+          // Check if chrome.tabCapture is available
+          if (!chrome.tabCapture || !chrome.tabCapture.getMediaStreamId) {
+            reject(new Error('Chrome Tab Capture API not available. Please update Chrome to version 116 or later.'));
+            return;
+          }
+
+          console.log('POPUP: Requesting stream ID with getMediaStreamId...');
+          chrome.tabCapture.getMediaStreamId({
+            targetTabId: currentTab.id
+          }, (streamId) => {
+            if (chrome.runtime.lastError) {
+              console.error('POPUP: getMediaStreamId error:', chrome.runtime.lastError);
+              
+              // Provide user-friendly error messages
+              let errorMessage = chrome.runtime.lastError.message;
+              if (errorMessage.includes('Permission dismissed')) {
+                errorMessage = 'Permission was dismissed. Please click the extension button again and allow tab capture when prompted.';
+              } else if (errorMessage.includes('tab is not audible')) {
+                errorMessage = 'This tab is not playing audio. Please navigate to a page with audio content (like YouTube, Netflix, etc.) and try again.';
+              } else if (errorMessage.includes('Invalid tab')) {
+                errorMessage = 'Cannot capture this tab. Please try on a regular webpage with audio content.';
+              }
+              
+              reject(new Error(errorMessage));
+              return;
+            }
+            
+            if (!streamId) {
+              reject(new Error('No stream ID received from Chrome. Please ensure the tab has audio content and try again.'));
+              return;
+            }
+            
+            console.log('POPUP: Successfully got stream ID:', streamId);
+            resolve(streamId);
+          });
+        });
+      } catch (error) {
+        console.error('POPUP: Stream ID error:', error);
+        this.showStatus(error.message, 'error');
+        this.elements.startTranscription.disabled = false;
+        this.elements.startTranscription.textContent = 'Start Transcription';
+        return;
+      }
+
+      // Send start transcription message with stream ID (back to original approach)
+      console.log('POPUP: Sending transcription start request with stream ID...');
       const response = await new Promise((resolve) => {
         chrome.runtime.sendMessage({
-          type: 'START_TRANSCRIPTION'
+          type: 'START_TRANSCRIPTION',
+          streamId: streamId,
+          tabId: currentTab.id
         }, resolve);
       });
       
-      if (response.success) {
+      console.log('POPUP: Background response:', response);
+      
+      if (response && response.success) {
         this.isTranscribing = true;
         this.updateUIForTranscription(true);
-        this.showStatus('Transcription started! Captions will appear on the page.', 'success');
+        this.showStatus('🎤 Transcription started! Audio will be restored shortly...', 'success');
+        console.log('POPUP: ✅ Transcription started successfully');
+        
+        // Show helpful info about audio behavior
+        setTimeout(() => {
+          this.showStatus('📺 Live captions active! Audio should now be playing normally.', 'info');
+        }, 2000);
       } else {
-        this.showStatus(`Failed to start transcription: ${response.error}`, 'error');
+        const errorMsg = response?.error || 'Unknown error occurred';
+        console.error('POPUP: ❌ Transcription failed:', errorMsg);
+        this.showStatus(`Failed to start transcription: ${errorMsg}`, 'error');
       }
     } catch (error) {
       console.error('Error starting transcription:', error);
-      this.showStatus('Error starting transcription', 'error');
+      this.showStatus('Error starting transcription: ' + error.message, 'error');
     } finally {
       this.elements.startTranscription.disabled = false;
       this.elements.startTranscription.textContent = 'Start Transcription';

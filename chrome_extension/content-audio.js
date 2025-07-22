@@ -1,14 +1,14 @@
-// Content script for audio capture
+// Content script for audio capture using AudioWorklet
 class AudioCapture {
   constructor() {
-    this.stream = null;
-    this.audioContext = null;
-    this.processor = null;
     this.isCapturing = false;
+    this.mediaStream = null;
+    this.audioContext = null;
+    this.audioWorkletNode = null;
+    this.chunkCount = 0;
     
-    console.log('AUDIO_INIT: AudioCapture constructor called');
+    console.log('AUDIO_CONTENT: AudioWorklet-based AudioCapture initialized');
     this.setupMessageListener();
-    console.log('AUDIO_INIT: AudioCapture ready for messages');
   }
   
   setupMessageListener() {
@@ -16,180 +16,196 @@ class AudioCapture {
       console.log('AUDIO_CONTENT: Received message:', request);
       
       switch (request.type) {
-        case 'START_AUDIO_CAPTURE':
-          this.startCapture()
-            .then(() => sendResponse({success: true}))
-            .catch(error => sendResponse({success: false, error: error.message}));
+        case 'START_AUDIO_CAPTURE_WITH_STREAM_ID':
+          console.log('AUDIO_CONTENT: Starting audio capture with stream ID:', request.streamId);
+          this.startCapture(request.streamId)
+            .then(() => {
+              console.log('✅ AUDIO_CONTENT: Audio capture started successfully');
+              sendResponse({success: true});
+            })
+            .catch(error => {
+              console.error('❌ AUDIO_CONTENT: Audio capture failed:', error);
+              sendResponse({success: false, error: error.message});
+            });
           return true; // Keep message channel open for async response
           
         case 'STOP_AUDIO_CAPTURE':
+          console.log('AUDIO_CONTENT: Stopping audio capture');
           this.stopCapture();
           sendResponse({success: true});
           break;
           
         case 'PING':
-          // Respond to ping to confirm content script is loaded
-          sendResponse({success: true});
+          sendResponse({success: true, isCapturing: this.isCapturing});
           break;
       }
     });
   }
   
-  async startCapture() {
+  async startCapture(streamId) {
     if (this.isCapturing) {
-      console.log('ERROR_ALREADY_CAPTURING: Audio capture already running');
-      throw new Error('Audio capture is already running');
+      throw new Error('Audio capture already running');
     }
     
     try {
-      console.log('STEP_1: Checking if getDisplayMedia is available...');
+      console.log('AUDIO_CONTENT: Starting audio capture with stream ID:', streamId);
       
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        throw new Error('ERROR_NO_DISPLAY_MEDIA: getDisplayMedia API not supported in this browser');
-      }
-      
-      console.log('STEP_2: Requesting display media with audio...');
-      
-      // Request screen sharing with audio
-      this.stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true, // We need video to get the tab option
+      // Get media stream using the stream ID from tabCapture
+      // Use the newer constraints format that works better in content scripts
+      const constraints = {
         audio: {
+          chromeMediaSource: "tab",
+          chromeMediaSourceId: streamId,
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-          sampleRate: 16000
-        }
-      });
-      
-      console.log('STEP_3: Got stream response:', this.stream);
-      
-      if (!this.stream) {
-        throw new Error('ERROR_NO_STREAM: No media stream received from getDisplayMedia');
-      }
-      
-      console.log('STEP_4: Checking for audio tracks...');
-      
-      // Check if we got audio tracks
-      const audioTracks = this.stream.getAudioTracks();
-      const videoTracks = this.stream.getVideoTracks();
-      
-      console.log(`STEP_5: Stream info - Audio tracks: ${audioTracks.length}, Video tracks: ${videoTracks.length}`);
-      
-      // Detailed audio track info
-      audioTracks.forEach((track, index) => {
-        console.log(`🎵 Audio Track ${index}:`, {
-          label: track.label,
-          enabled: track.enabled,
-          muted: track.muted,
-          readyState: track.readyState,
-          settings: track.getSettings()
-        });
-      });
-      
-      if (audioTracks.length === 0) {
-        throw new Error('ERROR_NO_AUDIO_TRACK: No audio track in the stream. Make sure to check "Share audio" when selecting the tab.');
-      }
-      
-      console.log('✅ Got media stream with audio tracks:', audioTracks.length);
-      
-      // Set up audio processing with AudioWorklet
-      this.audioContext = new AudioContext({ sampleRate: 16000 });
-      const source = this.audioContext.createMediaStreamSource(this.stream);
-      
-      console.log('STEP_6: Loading AudioWorklet...');
-      
-      // Load the AudioWorklet processor
-      await this.audioContext.audioWorklet.addModule(chrome.runtime.getURL('audio-processor.js'));
-      
-      console.log('STEP_7: Creating AudioWorkletNode...');
-      
-      // Create AudioWorkletNode
-      this.processor = new AudioWorkletNode(this.audioContext, 'audio-processor');
-      
-      // Listen for processed audio data
-      this.processor.port.onmessage = (event) => {
-        if (!this.isCapturing) return;
-        
-        if (event.data.type === 'AUDIO_DATA') {
-          const amplitude = event.data.amplitude || 0;
-          const hasAudio = amplitude > 100; // Threshold for detecting actual audio
-          
-          if (hasAudio) {
-            console.log('🎵 AUDIO_WORKLET: Active audio detected! Amplitude:', amplitude, 'samples:', event.data.data.length);
-          } else {
-            console.log('🔇 AUDIO_WORKLET: Silent/low audio, amplitude:', amplitude);
-          }
-          
-          // Send audio data to background script
-          chrome.runtime.sendMessage({
-            type: 'AUDIO_DATA',
-            data: Array.from(event.data.data) // Convert Int16Array to array for message passing
-          });
+          sampleRate: 16000  // Try to request 16kHz directly
         }
       };
       
-      // Start processing
-      this.processor.port.postMessage({ type: 'START' });
+      console.log('AUDIO_CONTENT: Requesting getUserMedia with constraints...');
+      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      source.connect(this.processor);
-      this.processor.connect(this.audioContext.destination);
+      console.log('AUDIO_CONTENT: Got media stream with', this.mediaStream.getAudioTracks().length, 'audio tracks');
+      
+      // Set up audio processing
+      await this.setupAudioProcessing();
       
       this.isCapturing = true;
-      console.log('✅ Audio capture started successfully');
-      
-      // Handle stream end
-      this.stream.getTracks().forEach(track => {
-        track.onended = () => {
-          console.log('Media track ended');
-          this.stopCapture();
-        };
-      });
+      console.log('✅ AUDIO_CONTENT: Audio capture started successfully');
       
     } catch (error) {
-      console.error('Audio capture failed:', error);
+      console.error('❌ AUDIO_CONTENT: Failed to start capture:', error);
       this.stopCapture();
       throw error;
     }
   }
   
-  stopCapture() {
-    this.isCapturing = false;
+  async setupAudioProcessing() {
+    console.log('AUDIO_CONTENT: Setting up AudioWorklet processing...');
     
-    if (this.processor) {
-      // Stop the AudioWorklet processing
-      this.processor.port.postMessage({ type: 'STOP' });
-      this.processor.disconnect();
-      this.processor = null;
+    try {
+      // Create audio context with 16kHz sample rate for AssemblyAI
+      this.audioContext = new AudioContext({ 
+        sampleRate: 16000,
+        latencyHint: 'interactive'
+      });
+      
+      console.log('AUDIO_CONTENT: AudioContext created with sample rate:', this.audioContext.sampleRate);
+      
+      // Load the AudioWorklet module
+      const audioProcessorUrl = chrome.runtime.getURL('audio-processor.js');
+      console.log('AUDIO_CONTENT: Loading AudioWorklet from URL:', audioProcessorUrl);
+      
+      try {
+        await this.audioContext.audioWorklet.addModule(audioProcessorUrl);
+        console.log('AUDIO_CONTENT: AudioWorklet module loaded successfully');
+      } catch (workletError) {
+        console.error('AUDIO_CONTENT: Failed to load AudioWorklet module:', workletError);
+        throw new Error('AudioWorklet module loading failed: ' + workletError.message);
+      }
+      
+      // Create AudioWorklet node
+      try {
+        this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-processor');
+        console.log('AUDIO_CONTENT: AudioWorkletNode created successfully');
+      } catch (nodeError) {
+        console.error('AUDIO_CONTENT: Failed to create AudioWorkletNode:', nodeError);
+        throw new Error('AudioWorkletNode creation failed: ' + nodeError.message);
+      }
+      
+      // Listen for audio data from the worklet
+      this.audioWorkletNode.port.onmessage = (event) => {
+        if (event.data.type === 'AUDIO_DATA') {
+          this.handleAudioData(event.data);
+        }
+      };
+      
+      // Create media stream source
+      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+      
+      // Connect: source -> AudioWorklet
+      source.connect(this.audioWorkletNode);
+      // Note: Don't connect to destination to avoid audio feedback
+      
+      // Start the worklet processing
+      this.audioWorkletNode.port.postMessage({ type: 'START' });
+      
+      // Ensure audio context is running
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      
+      console.log('✅ AUDIO_CONTENT: AudioWorklet processing setup complete');
+      console.log('AUDIO_CONTENT: AudioContext state:', this.audioContext.state);
+      
+    } catch (error) {
+      console.error('❌ AUDIO_CONTENT: AudioWorklet setup error:', error);
+      throw error;
+    }
+  }
+  
+  handleAudioData(audioData) {
+    // Send audio data directly to background service worker
+    chrome.runtime.sendMessage({
+      type: 'AUDIO_DATA_FROM_CONTENT',
+      data: Array.from(audioData.data), // Convert Int16Array to regular array
+      amplitude: audioData.amplitude,
+      sampleRate: 16000
+    }).catch(error => {
+      console.error('❌ AUDIO_CONTENT: Failed to send audio data to background:', error);
+    });
+    
+    // Log audio activity for debugging
+    this.chunkCount++;
+    if (audioData.amplitude > 100 && this.chunkCount % 20 === 0) {
+      console.log('🎵 AUDIO_CONTENT: Active audio sent - chunk:', this.chunkCount, 
+                 'amplitude:', audioData.amplitude, 'samples:', audioData.data.length);
+    } else if (this.chunkCount % 100 === 0) {
+      console.log('🔇 AUDIO_CONTENT: Audio chunk sent - total:', this.chunkCount);
+    }
+  }
+  
+  stopCapture() {
+    console.log('AUDIO_CONTENT: Stopping audio capture...');
+    this.isCapturing = false;
+    this.chunkCount = 0;
+    
+    // Stop AudioWorklet
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.port.postMessage({ type: 'STOP' });
+      this.audioWorkletNode.disconnect();
+      this.audioWorkletNode = null;
+      console.log('AUDIO_CONTENT: AudioWorklet stopped and disconnected');
     }
     
+    // Close audio context
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
+      console.log('AUDIO_CONTENT: AudioContext closed');
     }
     
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-      this.stream = null;
+    // Stop media stream
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => {
+        track.stop();
+        console.log('AUDIO_CONTENT: Track stopped:', track.label);
+      });
+      this.mediaStream = null;
     }
     
-    console.log('🛑 Audio capture stopped');
-    
-    // Notify background script
-    chrome.runtime.sendMessage({
-      type: 'AUDIO_CAPTURE_STOPPED'
-    });
+    console.log('🛑 AUDIO_CONTENT: Audio capture stopped completely');
   }
 }
 
 // Initialize audio capture when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    console.log('AUDIO_INIT: DOM loaded, creating AudioCapture...');
     new AudioCapture();
   });
 } else {
-  console.log('AUDIO_INIT: DOM ready, creating AudioCapture...');
   new AudioCapture();
 }
 
-console.log('🎤 Audio capture content script loaded at:', new Date().toISOString());
+console.log('🎤 AUDIO_CONTENT: Legacy audio capture content script loaded (offscreen handles actual capture)');

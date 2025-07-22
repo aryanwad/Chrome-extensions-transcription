@@ -44,6 +44,8 @@ class AudioProcessor extends AudioWorkletProcessor {
         const chunk = this.buffer.splice(0, this.bufferSize);
         
         // Convert Float32Array to Int16Array for AssemblyAI
+
+        console.log("hi");
         const int16Array = new Int16Array(chunk.length);
         let maxAmplitude = 0;
         for (let i = 0; i < chunk.length; i++) {

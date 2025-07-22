@@ -4,100 +4,131 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a live transcription application that captures system audio and provides real-time transcription with an AI assistant overlay. The system consists of:
+This is a **Chrome Extension** for live transcription that captures browser tab audio and provides real-time transcription with an overlay. The system consists of:
 
-1. **Audio capture** from system output (using BlackHole on macOS or VB-Cable on Windows)
-2. **Real-time transcription** via AssemblyAI WebSocket streaming
-3. **GUI overlay** displaying live captions with transparent background
-4. **AI assistant integration** with OpenAI GPT-4 for transcript-based interactions
-5. **Persistent transcript logging** to `full_transcript.txt`
+1. **Chrome Tab Capture** using Manifest V3 with `chrome.tabCapture.getMediaStreamId()`
+2. **Offscreen Document** for audio processing (Chrome 116+ approach)
+3. **Real-time transcription** via AssemblyAI v3 WebSocket streaming
+4. **Browser overlay** displaying live captions on web pages
+5. **AI assistant integration** with OpenAI GPT-4 for transcript-based interactions
 
-## Key Files
+## Key Chrome Extension Files
 
-- `overlay_with_agent.py` - Main application entry point containing:
-  - Audio capture from BlackHole device
-  - WebSocket connection to AssemblyAI
-  - Tkinter GUI overlay for captions
-  - "Ask Agent" button with popup interface
-- `agent_utils.py` - OpenAI integration utilities providing:
-  - `ask_question()` - Query AI about transcript content
-  - `summarize_transcript()` - Generate transcript summaries
-  - `draft_followup_email()` - Create follow-up emails from transcript
-- `full_transcript.txt` - Auto-generated transcript file with timestamps
+### Core Files
+- `manifest.json` - Manifest V3 configuration with tabCapture and offscreen permissions
+- `background.js` - Service worker handling WebSocket connections to AssemblyAI v3
+- `popup.js` - Extension popup for user interaction and `chrome.tabCapture.getMediaStreamId()`
+- `popup.html` - Extension popup interface
+- `content.js` - Content script for overlay display on web pages
+- `content-audio.js` - Legacy content script (now minimal, actual capture in offscreen)
+- `offscreen.js` - Offscreen document handling audio capture and PCM16 conversion
+- `offscreen.html` - Offscreen document HTML
+- `overlay.css` - Styling for the transcription overlay
 
-## Dependencies
+### Deprecated Python Files (Not Used)
+- `overlay_with_agent.py` - Old Python implementation (replaced by Chrome extension)
+- `agent_utils.py` - Old Python utilities (functionality moved to background.js)
 
-Install required packages:
-```bash
-pip install sounddevice numpy websocket-client openai
+## Current Implementation Status (as of 2025-07-21)
+
+### ✅ WORKING COMPONENTS:
+1. **Chrome Tab Capture**: Successfully captures audio from browser tabs
+   - User clicks extension → `getMediaStreamId()` works
+   - No tab picker required (seamless UX)
+   - Audio stops playing in tab (confirms capture working)
+
+2. **AssemblyAI v3 Connection**: WebSocket connects successfully
+   - Proper authentication with token in URL
+   - Receives "Begin" messages from AssemblyAI
+   - WebSocket state shows as OPEN
+
+3. **Extension Infrastructure**: All components load properly
+   - Service worker starts without errors
+   - Content scripts inject successfully
+   - Popup interface works
+   - Offscreen document created
+
+4. **Overlay System**: Content script overlay displays correctly
+   - Shows test messages ("Test transcript - if you see this, the overlay system works!")
+   - Overlay appears/hides properly
+   - Stop button functional
+
+### ❌ CURRENT ISSUE:
+**Audio Processing in Offscreen Document**: The main problem is in `offscreen.js`
+- Audio capture appears to work (YouTube audio stops playing)
+- But no audio data is being processed and sent to AssemblyAI
+- No "Turn" messages received from AssemblyAI (only "Begin")
+- No live transcription text appearing in overlay
+
+### 🔍 DEBUGGING STATUS:
+**Extension logs show:**
+```
+✅ Background: "WebSocket connected to AssemblyAI v3 streaming"
+✅ Background: "Offscreen capture started successfully" 
+✅ Content: Test overlay message displays
+❌ Missing: No audio chunks being sent to AssemblyAI
+❌ Missing: No "OFFSCREEN:" messages in console logs
 ```
 
-## Audio Setup
+## Architecture (Chrome Extension)
 
-### macOS (BlackHole)
-1. Install BlackHole: https://existential.audio/blackhole/
-2. Set system output to BlackHole or create Multi-Output Device
-3. Application auto-detects BlackHole device on startup
+### Data Flow:
+1. **User Interaction**: User clicks extension popup
+2. **Permission**: `popup.js` calls `chrome.tabCapture.getMediaStreamId()`
+3. **Stream ID**: Popup sends stream ID to background service worker
+4. **Offscreen Setup**: Background creates offscreen document
+5. **Audio Capture**: Offscreen uses `getUserMedia()` with stream ID
+6. **Audio Processing**: Offscreen converts to PCM16 format (16kHz, 50ms chunks)
+7. **WebSocket**: Background sends audio data to AssemblyAI v3
+8. **Transcription**: AssemblyAI sends back "Turn" messages with transcripts
+9. **Display**: Background forwards transcripts to content script overlay
 
-### Windows (VB-Cable)
-1. Install VB-Cable: https://vb-audio.com/Cable/
-2. Set system output to VB-Cable
-3. Modify `find_blackhole()` function to detect VB-Cable device
+### Message Passing:
+- `popup.js` → `background.js` (START_TRANSCRIPTION with streamId)
+- `background.js` → `offscreen.js` (START_OFFSCREEN_CAPTURE with streamId)
+- `offscreen.js` → `background.js` (AUDIO_DATA_FROM_OFFSCREEN)
+- `background.js` → `content.js` (NEW_TRANSCRIPT for overlay display)
 
-## Running the Application
+## Audio Format Requirements (AssemblyAI v3)
 
-```bash
-python overlay_with_agent.py
-```
+- **Sample Rate**: 16kHz
+- **Format**: PCM16 (16-bit signed integer)
+- **Channels**: Mono (single-channel)
+- **Chunk Size**: 50ms (800 samples at 16kHz)
+- **Encoding**: Little-endian Int16Array sent as ArrayBuffer
 
-## Configuration
+## API Configuration
 
-### Audio Settings
-- `CAPTURE_RATE = 48000` - Audio capture sample rate
-- `SEND_RATE = 16000` - Rate sent to AssemblyAI
-- `CHANNELS = 2` - Stereo audio capture
-- `FRAMES_PER_BUF` - Buffer size for audio processing
+### AssemblyAI v3 WebSocket
+- **URL**: `wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true&token=<API_KEY>`
+- **Authentication**: Token-based (in URL parameters)
+- **Message Types**: "Begin", "Turn", "End"
 
-### API Keys
-- API keys are stored in `config.py` file
-- AssemblyAI API key: `ASSEMBLYAI_API_KEY`
-- OpenAI API key: `OPENAI_API_KEY`
+### Hardcoded API Keys (in background.js)
+- AssemblyAI API Key: `d075180583e743dc84435b50f422373b`
+- OpenAI API Key: `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`
 
-**SECURITY NOTE**: The `config.py` file is excluded from git via `.gitignore` to prevent API key exposure.
+## Next Steps for Debugging
 
-## Architecture
+1. **Fix Offscreen Audio Processing**: The offscreen document is not processing audio correctly
+   - Check if `offscreen.js` is actually receiving messages
+   - Verify `getUserMedia()` with stream ID works in offscreen context
+   - Ensure audio processing pipeline (Float32 → Int16 conversion) works
+   - Debug why no "OFFSCREEN:" log messages appear
 
-The application uses a multi-threaded architecture:
+2. **Verify Audio Data Flow**: Ensure audio reaches AssemblyAI
+   - Check if background receives audio data from offscreen
+   - Verify WebSocket.send() calls with audio ArrayBuffer
+   - Monitor for AssemblyAI "Turn" response messages
 
-1. **Main Thread**: Runs Tkinter GUI overlay
-2. **WebSocket Thread**: Handles AssemblyAI streaming connection
-3. **Audio Thread**: Captures system audio and streams to WebSocket
-4. **Agent Thread**: Processes AI requests asynchronously
+3. **Test Real Audio**: Use actual speaking/audio to test transcription
+   - Play YouTube video with speech
+   - Speak into microphone while screen sharing
+   - Verify amplitude detection and audio chunk generation
 
-Data flows through:
-- Audio capture → WebSocket → AssemblyAI → Caption queue → GUI display
-- Completed transcripts → File logging → AI agent context
+## Known Issues
 
-## GUI Components
-
-- **Caption Overlay**: Auto-resizing window showing live transcription
-- **Ask Agent Button**: Persistent button for AI interactions
-- **Agent Popup**: Multi-functional interface with:
-  - Question input field
-  - Scrollable response area
-  - Asynchronous processing
-
-## Development Notes
-
-- No formal testing framework currently implemented
-- No linting configuration present
-- Uses direct pip install approach (no requirements.txt)
-- Python 3.9+ required for modern type hints and features
-- GUI uses Tkinter (included with Python)
-
-## Common Issues
-
-- **BlackHole not found**: Ensure BlackHole is installed and properly configured
-- **WebSocket connection fails**: Check AssemblyAI API key and network connectivity
-- **No audio capture**: Verify system audio output is routed through BlackHole
-- **AI responses fail**: Check OpenAI API key and network access
+- **Extension Reload Required**: Changes to background.js require extension reload (toggle off/on)
+- **Offscreen Debugging**: No direct console access to offscreen document
+- **Chrome Version**: Requires Chrome 116+ for offscreen document + tabCapture compatibility
+- **Audio Feedback**: When tab capture works, original audio stops playing (expected behavior)
