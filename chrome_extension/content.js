@@ -97,6 +97,12 @@ class TranscriptionOverlay {
     this.agentButton.innerHTML = '🤖 Ask Agent';
     this.agentButton.onclick = () => this.showAgentDialog();
     
+    // Create Catch-Up button
+    this.catchupButton = document.createElement('button');
+    this.catchupButton.className = 'lt-catchup-button';
+    this.catchupButton.innerHTML = '⚡ Catch Up';
+    this.catchupButton.onclick = () => this.showCatchupDialog();
+    
     // Create Stop button
     this.stopButton = document.createElement('button');
     this.stopButton.className = 'lt-stop-button';
@@ -108,6 +114,7 @@ class TranscriptionOverlay {
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'lt-button-container';
     buttonContainer.appendChild(this.agentButton);
+    buttonContainer.appendChild(this.catchupButton);
     buttonContainer.appendChild(this.stopButton);
     
     this.controlsContainer.appendChild(buttonContainer);
@@ -269,6 +276,15 @@ class TranscriptionOverlay {
     return div.innerHTML;
   }
   
+  // Check if catch-up button should be visible
+  shouldShowCatchupButton() {
+    const url = window.location.href.toLowerCase();
+    return url.includes('twitch.tv') || 
+           url.includes('youtube.com') || 
+           url.includes('youtu.be') || 
+           url.includes('kick.com');
+  }
+  
   resizeOverlay() {
     if (!this.overlayContainer || !this.captionBox) return;
     
@@ -405,6 +421,24 @@ class TranscriptionOverlay {
         cursor: pointer !important;
         font-size: 12px !important;
         transition: background-color 0.2s !important;
+        margin-right: 8px !important;
+      `;
+    }
+    
+    if (this.catchupButton) {
+      // Show/hide catch-up button based on platform
+      const shouldShow = this.shouldShowCatchupButton() && this.isTranscribing;
+      this.catchupButton.style.cssText = `
+        ${shouldShow ? 'display: inline-block' : 'display: none'} !important;
+        background: #FF9800 !important;
+        color: white !important;
+        border: none !important;
+        padding: 8px 12px !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        font-size: 12px !important;
+        transition: background-color 0.2s !important;
+        margin-right: 8px !important;
       `;
     }
     
@@ -419,7 +453,6 @@ class TranscriptionOverlay {
         cursor: pointer !important;
         font-size: 12px !important;
         transition: background-color 0.2s !important;
-        margin-left: 8px !important;
       `;
     }
     
@@ -544,6 +577,364 @@ class TranscriptionOverlay {
     }
   }
   
+  showCatchupDialog() {
+    if (this.catchupDialog) {
+      this.catchupDialog.remove();
+    }
+    
+    // Create catch-up dialog
+    this.catchupDialog = document.createElement('div');
+    this.catchupDialog.className = 'lt-catchup-dialog';
+    this.catchupDialog.innerHTML = `
+      <div class="lt-catchup-content">
+        <div class="lt-catchup-header">
+          <h3>⚡ Stream Catch-Up</h3>
+          <button class="lt-close-btn" onclick="this.closest('.lt-catchup-dialog').remove()">×</button>
+        </div>
+        <div class="lt-catchup-body">
+          <p>Get an AI-powered summary of what you missed!</p>
+          <div class="lt-duration-options">
+            <button class="lt-duration-btn" data-duration="30">
+              <div class="duration-title">Last 30 Minutes</div>
+              <div class="duration-desc">Quick summary - FREE</div>
+            </button>
+            <button class="lt-duration-btn" data-duration="60">
+              <div class="duration-title">Last 60 Minutes</div>
+              <div class="duration-desc">Detailed summary - FREE</div>
+            </button>
+          </div>
+          <div class="lt-processing-section" style="display: none;">
+            <div class="lt-progress-bar">
+              <div class="lt-progress-fill"></div>
+            </div>
+            <div class="lt-progress-text">Analyzing stream...</div>
+          </div>
+          <div class="lt-result-section" style="display: none;">
+            <h4>📊 Stream Summary</h4>
+            <div class="lt-summary-content"></div>
+            <button class="lt-close-result-btn">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Add dialog styling
+    this.catchupDialog.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: rgba(0, 0, 0, 0.8) !important;
+      z-index: 2147483648 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-family: 'Segoe UI', Arial, sans-serif !important;
+    `;
+    
+    document.body.appendChild(this.catchupDialog);
+    this.setupCatchupHandlers();
+  }
+  
+  setupCatchupHandlers() {
+    const durationButtons = this.catchupDialog.querySelectorAll('.lt-duration-btn');
+    const processingSection = this.catchupDialog.querySelector('.lt-processing-section');
+    const resultSection = this.catchupDialog.querySelector('.lt-result-section');
+    const progressFill = this.catchupDialog.querySelector('.lt-progress-fill');
+    const progressText = this.catchupDialog.querySelector('.lt-progress-text');
+    const summaryContent = this.catchupDialog.querySelector('.lt-summary-content');
+    
+    // Handle duration selection
+    durationButtons.forEach(btn => {
+      btn.onclick = async () => {
+        const duration = parseInt(btn.dataset.duration);
+        await this.processCatchupRequest(duration, processingSection, resultSection, progressFill, progressText, summaryContent);
+      };
+    });
+    
+    // Handle close result button
+    const closeResultBtn = this.catchupDialog.querySelector('.lt-close-result-btn');
+    closeResultBtn.onclick = () => {
+      this.catchupDialog.remove();
+    };
+    
+    // Add CSS for the dialog content
+    const style = document.createElement('style');
+    style.textContent = `
+      .lt-catchup-content {
+        background: white !important;
+        border-radius: 12px !important;
+        max-width: 500px !important;
+        width: 90% !important;
+        max-height: 80vh !important;
+        overflow-y: auto !important;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3) !important;
+      }
+      
+      .lt-catchup-header {
+        padding: 20px 24px 0 24px !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        border-bottom: 1px solid #eee !important;
+        margin-bottom: 0 !important;
+      }
+      
+      .lt-catchup-header h3 {
+        margin: 0 0 16px 0 !important;
+        color: #333 !important;
+        font-size: 20px !important;
+      }
+      
+      .lt-close-btn {
+        background: none !important;
+        border: none !important;
+        font-size: 24px !important;
+        cursor: pointer !important;
+        color: #666 !important;
+        padding: 0 !important;
+        margin: 0 0 16px 0 !important;
+      }
+      
+      .lt-catchup-body {
+        padding: 24px !important;
+      }
+      
+      .lt-catchup-body p {
+        margin: 0 0 24px 0 !important;
+        color: #666 !important;
+        font-size: 16px !important;
+      }
+      
+      .lt-duration-options {
+        display: flex !important;
+        gap: 16px !important;
+        margin-bottom: 24px !important;
+      }
+      
+      .lt-duration-btn {
+        flex: 1 !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 20px 16px !important;
+        cursor: pointer !important;
+        transition: transform 0.2s, box-shadow 0.2s !important;
+      }
+      
+      .lt-duration-btn:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4) !important;
+      }
+      
+      .duration-title {
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        margin-bottom: 4px !important;
+      }
+      
+      .duration-desc {
+        font-size: 14px !important;
+        opacity: 0.9 !important;
+      }
+      
+      .lt-progress-bar {
+        width: 100% !important;
+        height: 8px !important;
+        background: #f0f0f0 !important;
+        border-radius: 4px !important;
+        overflow: hidden !important;
+        margin-bottom: 16px !important;
+      }
+      
+      .lt-progress-fill {
+        height: 100% !important;
+        background: linear-gradient(90deg, #667eea, #764ba2) !important;
+        border-radius: 4px !important;
+        transition: width 0.3s ease !important;
+        width: 0% !important;
+      }
+      
+      .lt-progress-text {
+        text-align: center !important;
+        color: #666 !important;
+        font-size: 14px !important;
+        margin-bottom: 16px !important;
+      }
+      
+      .lt-result-section h4 {
+        margin: 0 0 16px 0 !important;
+        color: #333 !important;
+        font-size: 18px !important;
+      }
+      
+      .lt-summary-content {
+        background: #f8f9fa !important;
+        border-radius: 8px !important;
+        padding: 20px !important;
+        margin-bottom: 24px !important;
+        line-height: 1.6 !important;
+        color: #333 !important;
+        font-size: 14px !important;
+      }
+      
+      .lt-close-result-btn {
+        background: #667eea !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 12px 24px !important;
+        cursor: pointer !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  async processCatchupRequest(duration, processingSection, resultSection, progressFill, progressText, summaryContent) {
+    try {
+      // Hide duration options and show processing
+      this.catchupDialog.querySelector('.lt-duration-options').style.display = 'none';
+      processingSection.style.display = 'block';
+      
+      // Update progress: Starting
+      this.updateProgress(progressFill, progressText, 10, 'Getting stream information...');
+      
+      // Get current tab URL
+      const currentUrl = window.location.href;
+      console.log('🎯 CATCHUP: Processing request for URL:', currentUrl, 'Duration:', duration + 'min');
+      
+      // Send request to background script
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          type: 'REQUEST_CATCHUP',
+          streamUrl: currentUrl,
+          duration: duration
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(response);
+          }
+        });
+      });
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to process catch-up request');
+      }
+      
+      console.log('✅ CATCHUP: Request initiated, task ID:', response.taskId);
+      
+      // Poll for progress updates
+      await this.pollCatchupProgress(response.taskId, progressFill, progressText, summaryContent, processingSection, resultSection);
+      
+    } catch (error) {
+      console.error('❌ CATCHUP: Error processing request:', error);
+      progressText.textContent = 'Error: ' + error.message;
+      progressFill.style.background = '#f44336';
+      
+      // Show error message
+      setTimeout(() => {
+        processingSection.style.display = 'none';
+        this.catchupDialog.querySelector('.lt-duration-options').style.display = 'flex';
+      }, 3000);
+    }
+  }
+  
+  async pollCatchupProgress(taskId, progressFill, progressText, summaryContent, processingSection, resultSection) {
+    const maxAttempts = 60; // 60 attempts * 2 seconds = 2 minutes max
+    let attempts = 0;
+    
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      
+      try {
+        const response = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({
+            type: 'CHECK_CATCHUP_STATUS',
+            taskId: taskId
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(response);
+            }
+          });
+        });
+        
+        if (response.success) {
+          const { status, progress, message, result } = response.data;
+          
+          // Update progress bar
+          this.updateProgress(progressFill, progressText, progress, message);
+          
+          if (status === 'complete' && result) {
+            clearInterval(pollInterval);
+            this.showCatchupResult(result, summaryContent, processingSection, resultSection);
+          } else if (status === 'failed') {
+            clearInterval(pollInterval);
+            throw new Error(message || 'Processing failed');
+          }
+        }
+        
+      } catch (error) {
+        clearInterval(pollInterval);
+        console.error('❌ CATCHUP: Progress polling error:', error);
+        progressText.textContent = 'Error checking progress: ' + error.message;
+      }
+      
+      // Timeout after max attempts
+      if (attempts >= maxAttempts) {
+        clearInterval(pollInterval);
+        progressText.textContent = 'Request timed out. Please try again.';
+      }
+    }, 2000); // Poll every 2 seconds
+  }
+  
+  updateProgress(progressFill, progressText, progress, message) {
+    progressFill.style.width = progress + '%';
+    progressText.textContent = message || `Processing... ${progress}%`;
+  }
+  
+  showCatchupResult(result, summaryContent, processingSection, resultSection) {
+    // Hide processing section
+    processingSection.style.display = 'none';
+    
+    // Format and show results
+    summaryContent.innerHTML = this.formatSummaryResult(result);
+    resultSection.style.display = 'block';
+    
+    console.log('✅ CATCHUP: Results displayed successfully');
+  }
+  
+  formatSummaryResult(result) {
+    return `
+      <div class="summary-section">
+        <h5>📝 Key Events</h5>
+        <p>${result.summary || 'Summary not available'}</p>
+      </div>
+      
+      <div class="summary-section">
+        <h5>⏱️ Processing Details</h5>
+        <p>Duration: ${result.duration || 'N/A'} minutes<br>
+        Clips processed: ${result.clipsProcessed || 'N/A'}<br>
+        Processing time: ${result.processingTime || 'N/A'} seconds</p>
+      </div>
+      
+      ${result.fullTranscript ? `
+      <div class="summary-section">
+        <h5>📋 Full Transcript</h5>
+        <div class="transcript-text" style="max-height: 200px; overflow-y: auto; font-size: 12px; background: white; padding: 12px; border-radius: 4px; margin-top: 8px;">
+          ${this.escapeHtml(result.fullTranscript)}
+        </div>
+      </div>
+      ` : ''}
+    `;
+  }
+
   showAgentDialog() {
     if (this.agentDialog) {
       this.agentDialog.remove();

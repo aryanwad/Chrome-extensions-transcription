@@ -13,6 +13,10 @@ class TranscriptionService {
     this.capturedStream = null;
     this.audioProcessor = null;
     
+    // Catch-up feature properties
+    this.catchupTasks = new Map(); // Store active catch-up tasks
+    this.backendUrl = 'http://localhost:8000'; // Backend API URL
+    
     // Load API keys from storage
     this.loadApiKeys().then(() => {
       this.keysLoaded = true;
@@ -626,6 +630,137 @@ class TranscriptionService {
       throw error;
     }
   }
+  
+  // Catch-up feature methods
+  async requestCatchup(streamUrl, duration) {
+    console.log('🎯 BG_CATCHUP: Processing catch-up request for:', streamUrl, 'Duration:', duration + 'min');
+    
+    try {
+      // Validate inputs
+      if (!streamUrl || typeof streamUrl !== 'string') {
+        throw new Error('Invalid stream URL provided.');
+      }
+      
+      if (!duration || (duration !== 30 && duration !== 60)) {
+        throw new Error('Duration must be either 30 or 60 minutes.');
+      }
+      
+      // Validate stream URL
+      if (!this.isValidStreamUrl(streamUrl)) {
+        throw new Error('Unsupported stream platform. Currently supports Twitch, YouTube, and Kick streams.');
+      }
+      
+      // Check if backend is accessible
+      try {
+        const healthResponse = await fetch(`${this.backendUrl}/`, { method: 'GET' });
+        if (!healthResponse.ok) {
+          throw new Error(`Backend health check failed: ${healthResponse.status}`);
+        }
+      } catch (healthError) {
+        throw new Error('Backend service is not available. Please ensure the catch-up service is running on localhost:8000.');
+      }
+      
+      // Send request to backend API
+      const response = await fetch(`${this.backendUrl}/api/catchup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'LiveTranscriptionExtension/1.0'
+        },
+        body: JSON.stringify({
+          stream_url: streamUrl,
+          duration_minutes: duration,
+          user_id: 'chrome-extension-user'
+        })
+      });
+      
+      if (!response.ok) {
+        let errorMessage = `Backend API error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch (parseError) {
+          // If we can't parse the error, use the generic message
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const data = await response.json();
+      const taskId = data.task_id;
+      
+      if (!taskId) {
+        throw new Error('Backend did not return a valid task ID.');
+      }
+      
+      // Store task info
+      this.catchupTasks.set(taskId, {
+        streamUrl,
+        duration,
+        status: 'processing',
+        startTime: Date.now()
+      });
+      
+      console.log('✅ BG_CATCHUP: Request initiated successfully, task ID:', taskId);
+      return { taskId, estimatedTime: data.estimated_time || '60-90 seconds' };
+      
+    } catch (error) {
+      console.error('❌ BG_CATCHUP: Failed to request catch-up:', error);
+      throw error;
+    }
+  }
+  
+  async checkCatchupStatus(taskId) {
+    console.log('🔍 BG_CATCHUP: Checking status for task:', taskId);
+    
+    try {
+      const response = await fetch(`${this.backendUrl}/api/catchup/${taskId}/status`);
+      
+      if (!response.ok) {
+        throw new Error(`Status check failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Update local task status
+      if (this.catchupTasks.has(taskId)) {
+        this.catchupTasks.set(taskId, {
+          ...this.catchupTasks.get(taskId),
+          ...data
+        });
+      }
+      
+      console.log('📊 BG_CATCHUP: Status update:', data.status, data.progress + '%');
+      return data;
+      
+    } catch (error) {
+      console.error('❌ BG_CATCHUP: Status check failed:', error);
+      throw error;
+    }
+  }
+  
+  isValidStreamUrl(url) {
+    const supportedPlatforms = [
+      'twitch.tv',
+      'youtube.com',
+      'youtu.be',
+      'kick.com'
+    ];
+    
+    return supportedPlatforms.some(platform => url.includes(platform));
+  }
+  
+  cleanupCatchupTasks() {
+    // Clean up completed or old tasks (older than 10 minutes)
+    const now = Date.now();
+    const maxAge = 10 * 60 * 1000; // 10 minutes
+    
+    for (const [taskId, task] of this.catchupTasks.entries()) {
+      if (task.status === 'complete' || task.status === 'failed' || (now - task.startTime) > maxAge) {
+        console.log('🧹 BG_CATCHUP: Cleaning up old task:', taskId);
+        this.catchupTasks.delete(taskId);
+      }
+    }
+  }
 }
 
 // Global service instance
@@ -687,6 +822,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'GET_TRANSCRIPT':
       sendResponse({success: true, transcript: transcriptionService.transcript});
       break;
+      
+    case 'REQUEST_CATCHUP':
+      console.log('📨 REQUEST_CATCHUP message received:', request.streamUrl, request.duration + 'min');
+      (async () => {
+        try {
+          const result = await transcriptionService.requestCatchup(request.streamUrl, request.duration);
+          console.log('✅ BG: Catch-up request successful:', result);
+          sendResponse({success: true, taskId: result.taskId, estimatedTime: result.estimatedTime});
+        } catch (error) {
+          console.error('❌ BG: Catch-up request failed:', error);
+          sendResponse({success: false, error: error.message});
+        }
+      })();
+      return true; // Keep message channel open for async response
+      
+    case 'CHECK_CATCHUP_STATUS':
+      console.log('📨 CHECK_CATCHUP_STATUS message received for task:', request.taskId);
+      (async () => {
+        try {
+          const status = await transcriptionService.checkCatchupStatus(request.taskId);
+          console.log('📊 BG: Status check successful:', status);
+          sendResponse({success: true, data: status});
+        } catch (error) {
+          console.error('❌ BG: Status check failed:', error);
+          sendResponse({success: false, error: error.message});
+        }
+      })();
+      return true; // Keep message channel open for async response
       
     case 'AUDIO_DATA_FROM_OFFSCREEN':
       // Forward audio data from offscreen document (AudioWorklet) to AssemblyAI WebSocket

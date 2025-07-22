@@ -1,0 +1,30 @@
+# Backend API Dependencies for Live Transcription Catch-Up
+
+# FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# HTTP client for API calls
+aiohttp==3.9.1
+
+# Data validation and parsing
+pydantic==2.5.0
+
+# CORS middleware
+python-multipart==0.0.6
+
+# Logging and utilities
+python-dateutil==2.8.2
+
+# For production (uncomment when ready for real API integrations):
+# yt-dlp==2023.12.30        # For real stream extraction
+# redis==5.0.1              # For task queue and caching
+# psycopg2-binary==2.9.9    # For PostgreSQL database
+
+# Currently using direct API calls for:
+# - AssemblyAI (via aiohttp)
+# - OpenAI (via aiohttp)
+
+# Development tools
+pytest==7.4.3
+pytest-asyncio==0.21.1
