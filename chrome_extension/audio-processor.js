@@ -3,8 +3,10 @@ class AudioProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.isProcessing = false;
-    this.bufferSize = 4096;
     this.buffer = [];
+    this.targetSampleRate = 16000; // AssemblyAI requirement
+    this.resampleBuffer = [];
+    this.lastSample = 0;
     
     // Listen for messages from main thread
     this.port.onmessage = (event) => {
@@ -13,9 +15,34 @@ class AudioProcessor extends AudioWorkletProcessor {
         console.log('WORKLET: Audio processing started');
       } else if (event.data.type === 'STOP') {
         this.isProcessing = false;
-        console.log('WORKLET: Audio processing stopped');
+        this.buffer = []; // Clear buffer
+        this.resampleBuffer = []; // Clear resample buffer
+        console.log('WORKLET: Audio processing stopped and buffers cleared');
       }
     };
+  }
+  
+  // Simple linear interpolation resampling
+  resample(inputData, inputSampleRate, outputSampleRate) {
+    if (inputSampleRate === outputSampleRate) {
+      return inputData;
+    }
+    
+    const ratio = inputSampleRate / outputSampleRate;
+    const outputLength = Math.floor(inputData.length / ratio);
+    const output = new Float32Array(outputLength);
+    
+    for (let i = 0; i < outputLength; i++) {
+      const srcIndex = i * ratio;
+      const srcIndexFloor = Math.floor(srcIndex);
+      const srcIndexCeil = Math.min(srcIndexFloor + 1, inputData.length - 1);
+      const fraction = srcIndex - srcIndexFloor;
+      
+      // Linear interpolation
+      output[i] = inputData[srcIndexFloor] * (1 - fraction) + inputData[srcIndexCeil] * fraction;
+    }
+    
+    return output;
   }
   
   process(inputs, outputs, parameters) {
@@ -27,38 +54,44 @@ class AudioProcessor extends AudioWorkletProcessor {
     const input = inputs[0];
     const inputData = input[0]; // Get first channel
     
-    // Copy input to output (passthrough)
+    // Copy input to output unchanged (passthrough for audio quality)
     if (outputs[0] && outputs[0][0]) {
       outputs[0][0].set(inputData);
     }
     
     if (inputData && inputData.length > 0) {
-      // Add to buffer for processing
-      for (let i = 0; i < inputData.length; i++) {
-        this.buffer.push(inputData[i]);
+      // Resample for AssemblyAI (16kHz) while keeping original for playback
+      const currentSampleRate = sampleRate; // Global from AudioWorkletGlobalScope
+      const resampledData = this.resample(inputData, currentSampleRate, this.targetSampleRate);
+      
+      // Add resampled data to buffer
+      for (let i = 0; i < resampledData.length; i++) {
+        this.resampleBuffer.push(resampledData[i]);
       }
       
-      // Process when we have enough data
-      while (this.buffer.length >= this.bufferSize) {
-        // Extract chunk
-        const chunk = this.buffer.splice(0, this.bufferSize);
+      // Process chunks for AssemblyAI (800 samples at 16kHz = 50ms)
+      const chunkSize = 800;
+      while (this.resampleBuffer.length >= chunkSize) {
+        const chunk = this.resampleBuffer.splice(0, chunkSize);
         
-        // Convert Float32Array to Int16Array for AssemblyAI
-
-        console.log("hi");
+        // Convert to Int16Array for AssemblyAI
         const int16Array = new Int16Array(chunk.length);
         let maxAmplitude = 0;
+        
         for (let i = 0; i < chunk.length; i++) {
           // Clamp and convert to 16-bit integer
-          int16Array[i] = Math.max(-32768, Math.min(32767, chunk[i] * 32767));
+          const sample = Math.max(-1, Math.min(1, chunk[i]));
+          int16Array[i] = Math.round(sample * 32767);
           maxAmplitude = Math.max(maxAmplitude, Math.abs(int16Array[i]));
         }
         
-        // Send audio data to main thread with amplitude info
+        // Send processed audio data to main thread
         this.port.postMessage({
           type: 'AUDIO_DATA',
           data: int16Array,
-          amplitude: maxAmplitude
+          amplitude: maxAmplitude,
+          originalSampleRate: currentSampleRate,
+          targetSampleRate: this.targetSampleRate
         });
       }
     }

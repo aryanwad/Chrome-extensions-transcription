@@ -211,33 +211,34 @@ class TranscriptionOverlay {
     if (text && text.trim()) {
       console.log('✏️ Updating caption with text:', text);
       
-      // Create animated text display with word highlighting
+      // YouTube-style smooth updates
       if (isFinal) {
         console.log('💚 Rendering FINAL transcript');
-        // Final transcript - show with completion animation
+        // Final transcript - smooth transition without flickering
         captionText.innerHTML = `<span class="lt-final-text">${this.escapeHtml(text)}</span>`;
-        captionStatus.textContent = 'Final';
+        captionStatus.textContent = '';
         captionStatus.className = 'lt-caption-status final';
         this.currentText = text;
         
-        // Add completion flash effect
-        captionText.style.animation = 'ltFlashComplete 0.3s ease-out';
+        // Subtle completion effect (less jarring than flash)
+        captionText.style.transition = 'color 0.5s ease';
+        captionText.style.color = '#4CAF50';
+        
+        // Auto-hide final transcript after a few seconds (YouTube behavior)
         setTimeout(() => {
-          captionText.style.animation = '';
-        }, 300);
+          if (captionText.textContent === text) {
+            captionText.style.opacity = '0.7';
+          }
+        }, 3000);
         
       } else {
         console.log('💛 Rendering PARTIAL transcript');
-        // Partial transcript - show with typing effect
-        const words = text.split(' ');
-        const wordsHtml = words.map((word, index) => {
-          const delay = index * 0.1; // Staggered animation
-          return `<span class="lt-word" style="animation-delay: ${delay}s">${this.escapeHtml(word)}</span>`;
-        }).join(' ');
-        
-        captionText.innerHTML = `<span class="lt-partial-text">${wordsHtml}</span>`;
-        captionStatus.textContent = 'Live...';
+        // Partial transcript - smooth update without word-by-word animation
+        captionText.innerHTML = `<span class="lt-partial-text">${this.escapeHtml(text)}</span>`;
+        captionStatus.textContent = '';
         captionStatus.className = 'lt-caption-status partial';
+        captionText.style.opacity = '1';
+        captionText.style.color = '#FFC107';
       }
       
       // Auto-resize overlay based on content

@@ -97,9 +97,9 @@ class OffscreenAudioProcessor {
     console.log('OFFSCREEN: Setting up AudioWorklet processing for AssemblyAI...');
     
     try {
-      // Create audio context with 16kHz sample rate (AssemblyAI requirement)
+      // Create audio context with native sample rate for better quality
+      // We'll downsample only for AssemblyAI processing, not for playback
       this.audioContext = new AudioContext({ 
-        sampleRate: 16000,
         latencyHint: 'interactive'
       });
       
@@ -162,14 +162,27 @@ class OffscreenAudioProcessor {
   }
   
   handleAudioData(audioData) {
+    // Don't process audio data if we're no longer processing
+    if (!this.isProcessing) {
+      return;
+    }
+    
     // Send audio data to background service worker
     chrome.runtime.sendMessage({
       type: 'AUDIO_DATA_FROM_OFFSCREEN',
       data: Array.from(audioData.data), // Convert Int16Array to regular array
       amplitude: audioData.amplitude,
       sampleRate: 16000
+    }).then(response => {
+      // If background service responds that transcription is stopped, stop processing
+      if (response && !response.success && response.reason === 'transcription_stopped') {
+        console.log('🛑 OFFSCREEN: Background service stopped transcription, stopping audio processing');
+        this.stopCapture();
+      }
     }).catch(error => {
       console.error('❌ OFFSCREEN: Failed to send audio data to background:', error);
+      // If we can't communicate with background, stop processing
+      this.stopCapture();
     });
     
     // Log audio activity for debugging

@@ -232,26 +232,33 @@ class TranscriptionService {
           // v3 API sends Turn messages with transcripts
           const text = data.transcript || "";
           const isFinal = data.end_of_turn || false;
+          const turnOrder = data.turn_order || 0;
           
-          console.log(`🎯 ${isFinal ? 'FINAL' : 'PARTIAL'} TRANSCRIPT RECEIVED:`);
-          console.log('   Text:', `"${text}"`);
-          console.log('   Length:', text.length);
-          console.log('   isFinal:', isFinal);
-          console.log('   end_of_turn_confidence:', data.end_of_turn_confidence);
+          // Only show transcript if it has meaningful content or is final
+          const shouldShow = text.trim().length > 0 && (
+            isFinal || 
+            text.length > 3 || // Show partials only if they have substance
+            data.end_of_turn_confidence > 0.1 // Or reasonable confidence
+          );
           
-          if (text.trim()) {
-            // Force show overlay for transcript
-            this.forceShowOverlay(text, isFinal);
+          if (shouldShow) {
+            console.log(`🎯 ${isFinal ? 'FINAL' : 'PARTIAL'} TRANSCRIPT (turn ${turnOrder}):`);
+            console.log('   Text:', `"${text}"`);
+            console.log('   Length:', text.length);
+            console.log('   Confidence:', data.end_of_turn_confidence);
             
-            // Send transcript using helper method
-            this.sendTranscriptToTab(text, isFinal);
+            // Use a smarter display strategy
+            this.displayTranscriptSmooth(text, isFinal, turnOrder);
             
             // Save to full transcript if final
-            if (isFinal) {
+            if (isFinal && text.trim()) {
               this.transcript += (this.transcript ? ' ' : '') + text;
               console.log('💾 SAVED_TO_TRANSCRIPT:', text);
               console.log('📊 FULL_TRANSCRIPT_LENGTH:', this.transcript.length);
             }
+          } else {
+            // Log skipped transcripts for debugging
+            console.log(`⏭️ SKIPPED short/low-confidence transcript: "${text}" (${text.length} chars, conf: ${data.end_of_turn_confidence})`);
           }
         } else if (messageType === "End") {
           console.log('⏹ SESSION_END: Session terminated');
@@ -283,6 +290,37 @@ class TranscriptionService {
     });
   }
   
+  displayTranscriptSmooth(text, isFinal, turnOrder) {
+    // Implement YouTube-like smooth captioning
+    // Track the current turn to avoid showing old updates
+    if (!this.currentTurnOrder) this.currentTurnOrder = -1;
+    
+    // Only update if this is a newer turn or same turn with more content
+    if (turnOrder > this.currentTurnOrder || (turnOrder === this.currentTurnOrder && isFinal)) {
+      this.currentTurnOrder = turnOrder;
+      
+      // Throttle partial updates to avoid flickering
+      if (!isFinal) {
+        // Clear any pending partial update
+        if (this.partialUpdateTimeout) {
+          clearTimeout(this.partialUpdateTimeout);
+        }
+        
+        // Delay partial updates to reduce flickering
+        this.partialUpdateTimeout = setTimeout(() => {
+          this.sendTranscriptToTab(text, false);
+        }, 100); // 100ms delay for smoother updates
+        
+      } else {
+        // Show final transcripts immediately
+        if (this.partialUpdateTimeout) {
+          clearTimeout(this.partialUpdateTimeout);
+          this.partialUpdateTimeout = null;
+        }
+        this.sendTranscriptToTab(text, true);
+      }
+    }
+  }
   
   sendTranscriptToTab(text, isFinal) {
     // Send transcript to the tab being transcribed (not the active tab)
@@ -409,48 +447,101 @@ class TranscriptionService {
   stopTranscription() {
     console.log('🛑 BG: Stopping all transcription services...');
     
-    // Close WebSocket connection
-    if (this.websocket) {
-      console.log('🔌 BG: Closing WebSocket connection...');
-      this.websocket.close();
-      this.websocket = null;
+    // Set stopping flag to prevent new operations
+    this.isTranscribing = false;
+    
+    // Clear any pending timeouts/intervals
+    if (this.partialUpdateTimeout) {
+      console.log('⏰ BG: Clearing partial update timeout...');
+      clearTimeout(this.partialUpdateTimeout);
+      this.partialUpdateTimeout = null;
     }
     
-    // Audio capture is now stopped by content script directly
+    // Close WebSocket connection properly
+    if (this.websocket) {
+      console.log('🔌 BG: Closing WebSocket connection...');
+      try {
+        this.websocket.close(1000, 'User requested stop'); // Normal closure
+        this.websocket = null;
+      } catch (error) {
+        console.warn('⚠️ BG: WebSocket close error (expected):', error.message);
+        this.websocket = null;
+      }
+    }
+    
+    // Stop offscreen document processing completely
+    console.log('📄 BG: Stopping offscreen document processing...');
+    chrome.runtime.sendMessage({
+      type: 'STOP_OFFSCREEN_CAPTURE'
+    }).catch(error => {
+      console.log('🔄 BG: Offscreen stop message sent (error expected):', error.message);
+    });
+    
+    // Close and cleanup offscreen document entirely
+    setTimeout(async () => {
+      try {
+        const hasDocument = await chrome.offscreen.hasDocument?.();
+        if (hasDocument) {
+          console.log('🗑️ BG: Closing offscreen document...');
+          await chrome.offscreen.closeDocument();
+          console.log('✅ BG: Offscreen document closed');
+        }
+      } catch (error) {
+        console.log('⚠️ BG: Offscreen document cleanup (expected):', error.message);
+      }
+    }, 500); // Give time for stop message to process
     
     // Clean up any legacy audio processing
     if (this.audioProcessor) {
       console.log('🎵 BG: Disconnecting legacy audio processor...');
-      this.audioProcessor.disconnect();
+      try {
+        this.audioProcessor.disconnect();
+      } catch (error) {
+        console.warn('⚠️ BG: Audio processor disconnect error:', error.message);
+      }
       this.audioProcessor = null;
     }
     
     if (this.capturedStream) {
       console.log('📹 BG: Stopping captured stream tracks...');
-      this.capturedStream.getTracks().forEach(track => track.stop());
+      try {
+        this.capturedStream.getTracks().forEach(track => track.stop());
+      } catch (error) {
+        console.warn('⚠️ BG: Stream track stop error:', error.message);
+      }
       this.capturedStream = null;
     }
     
     if (this.mediaStream) {
       console.log('🎤 BG: Stopping media stream tracks...');
-      this.mediaStream.getTracks().forEach(track => track.stop());
+      try {
+        this.mediaStream.getTracks().forEach(track => track.stop());
+      } catch (error) {
+        console.warn('⚠️ BG: Media stream stop error:', error.message);
+      }
       this.mediaStream = null;
     }
     
     if (this.audioContext) {
       console.log('🔊 BG: Closing audio context...');
-      this.audioContext.close();
+      try {
+        this.audioContext.close();
+      } catch (error) {
+        console.warn('⚠️ BG: Audio context close error:', error.message);
+      }
       this.audioContext = null;
     }
     
-    // Clear transcription state
-    this.isTranscribing = false;
+    // Reset all state variables completely
     this.currentTranscriptionTabId = null;
     this.audioChunkCount = 0;
+    this.currentTurnOrder = -1;
+    this.keysLoaded = true; // Keep this so we don't reload keys
     
-    // Notify all content scripts that transcription stopped
+    // Send stop messages to content scripts (both overlay and audio processing)
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
+        // Stop transcription display
         chrome.tabs.sendMessage(tab.id, {
           type: 'TRANSCRIPTION_STOPPED'
         }, () => {
@@ -459,10 +550,31 @@ class TranscriptionService {
             // Silent ignore - many tabs won't have our content script
           }
         });
+        
+        // Stop any content script audio processing
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'STOP_AUDIO_CAPTURE'
+        }, () => {
+          if (chrome.runtime.lastError) {
+            // Silent ignore - many tabs won't have our content script
+          }
+        });
       });
     });
     
-    console.log('✅ BG: All transcription services stopped successfully');
+    console.log('✅ BG: All transcription services stopped and cleaned up completely');
+    
+    // Force garbage collection hint (if available)
+    if (typeof gc === 'function') {
+      setTimeout(() => {
+        try {
+          gc();
+          console.log('🗑️ BG: Garbage collection triggered');
+        } catch (e) {
+          // gc() might not be available
+        }
+      }, 1000);
+    }
   }
   
   async askAiQuestion(question) {
@@ -569,6 +681,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
     case 'AUDIO_DATA_FROM_OFFSCREEN':
       // Forward audio data from offscreen document (AudioWorklet) to AssemblyAI WebSocket
+      // But only if transcription is still active
+      if (!transcriptionService.isTranscribing) {
+        // Silently drop audio data if transcription is stopped
+        sendResponse({success: false, reason: 'transcription_stopped'});
+        break;
+      }
+      
       if (transcriptionService.websocket?.readyState === WebSocket.OPEN) {
         try {
           // Convert array back to Int16Array for AssemblyAI
@@ -595,10 +714,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           console.error('❌ BG_AUDIO: Error processing audio data:', error);
         }
       } else {
-        console.warn('❌ BG_AUDIO: WebSocket not open, dropping audio data. State:', 
-          transcriptionService.websocket?.readyState || 'null');
+        // Don't log warnings if transcription is intentionally stopped
+        if (transcriptionService.isTranscribing) {
+          console.warn('❌ BG_AUDIO: WebSocket not open, dropping audio data. State:', 
+            transcriptionService.websocket?.readyState || 'null');
+        }
       }
-      sendResponse({success: true});
+      sendResponse({success: transcriptionService.isTranscribing});
       break;
       
       
