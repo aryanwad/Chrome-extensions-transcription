@@ -291,25 +291,32 @@ class TranscriptionService {
   }
   
   displayTranscriptSmooth(text, isFinal, turnOrder) {
-    // Implement YouTube-like smooth captioning
-    // Track the current turn to avoid showing old updates
+    // Implement optimized real-time captioning
     if (!this.currentTurnOrder) this.currentTurnOrder = -1;
+    if (!this.lastPartialText) this.lastPartialText = '';
     
-    // Only update if this is a newer turn or same turn with more content
-    if (turnOrder > this.currentTurnOrder || (turnOrder === this.currentTurnOrder && isFinal)) {
+    // Only update if this is a newer turn or significantly different content
+    const isNewerTurn = turnOrder > this.currentTurnOrder;
+    const isSignificantUpdate = turnOrder === this.currentTurnOrder && (
+      isFinal || 
+      text.length > this.lastPartialText.length + 2 || // At least 2+ new characters
+      text.split(' ').length > this.lastPartialText.split(' ').length // New word
+    );
+    
+    if (isNewerTurn || isSignificantUpdate) {
       this.currentTurnOrder = turnOrder;
       
-      // Throttle partial updates to avoid flickering
       if (!isFinal) {
-        // Clear any pending partial update
+        // Optimized partial updates - only if meaningful change
         if (this.partialUpdateTimeout) {
           clearTimeout(this.partialUpdateTimeout);
         }
         
-        // Delay partial updates to reduce flickering
+        // Reduced delay for more responsive updates
         this.partialUpdateTimeout = setTimeout(() => {
           this.sendTranscriptToTab(text, false);
-        }, 100); // 100ms delay for smoother updates
+          this.lastPartialText = text;
+        }, 50); // Faster 50ms delay for better real-time feel
         
       } else {
         // Show final transcripts immediately
@@ -318,6 +325,7 @@ class TranscriptionService {
           this.partialUpdateTimeout = null;
         }
         this.sendTranscriptToTab(text, true);
+        this.lastPartialText = '';
       }
     }
   }
@@ -536,6 +544,7 @@ class TranscriptionService {
     this.currentTranscriptionTabId = null;
     this.audioChunkCount = 0;
     this.currentTurnOrder = -1;
+    this.lastPartialText = '';
     this.keysLoaded = true; // Keep this so we don't reload keys
     
     // Send stop messages to content scripts (both overlay and audio processing)

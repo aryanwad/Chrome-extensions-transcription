@@ -71,10 +71,10 @@ class TranscriptionOverlay {
   }
   
   createOverlay() {
-    // Create main overlay container
-    this.overlayContainer = document.createElement('div');
-    this.overlayContainer.id = 'live-transcription-overlay';
-    this.overlayContainer.className = 'lt-overlay-container';
+    // Create caption container (bottom center)
+    this.captionContainer = document.createElement('div');
+    this.captionContainer.id = 'live-transcription-captions';
+    this.captionContainer.className = 'lt-caption-container';
     
     // Create caption box
     this.captionBox = document.createElement('div');
@@ -83,6 +83,13 @@ class TranscriptionOverlay {
       <div class="lt-caption-text"></div>
       <div class="lt-caption-status"></div>
     `;
+    
+    this.captionContainer.appendChild(this.captionBox);
+    
+    // Create controls container (top right)
+    this.controlsContainer = document.createElement('div');
+    this.controlsContainer.id = 'live-transcription-controls';
+    this.controlsContainer.className = 'lt-controls-container';
     
     // Create Ask Agent button
     this.agentButton = document.createElement('button');
@@ -103,16 +110,19 @@ class TranscriptionOverlay {
     buttonContainer.appendChild(this.agentButton);
     buttonContainer.appendChild(this.stopButton);
     
-    // Add elements to container
-    this.overlayContainer.appendChild(this.captionBox);
-    this.overlayContainer.appendChild(buttonContainer);
+    this.controlsContainer.appendChild(buttonContainer);
     
-    // Inject into page
-    document.body.appendChild(this.overlayContainer);
+    // Inject both containers into page
+    document.body.appendChild(this.captionContainer);
+    document.body.appendChild(this.controlsContainer);
     
     // Start completely hidden
-    this.overlayContainer.style.display = 'none';
+    this.captionContainer.style.display = 'none';
+    this.controlsContainer.style.display = 'none';
     this.isVisible = false;
+    
+    // Keep reference to the old overlayContainer for compatibility
+    this.overlayContainer = this.captionContainer;
   }
   
   setupMessageListener() {
@@ -241,8 +251,7 @@ class TranscriptionOverlay {
         captionText.style.color = '#FFC107';
       }
       
-      // Auto-resize overlay based on content
-      this.resizeOverlay();
+      // No need to resize - captions are bottom-centered and auto-width
       
       console.log('✅ Caption updated successfully');
     } else {
@@ -289,10 +298,40 @@ class TranscriptionOverlay {
   }
   
   show() {
-    console.log('🎨 SHOW() called, overlayContainer exists:', !!this.overlayContainer);
-    if (this.overlayContainer) {
-      // Beautiful overlay styling
-      this.overlayContainer.style.cssText = `
+    console.log('🎨 SHOW() called, containers exist:', !!this.captionContainer, !!this.controlsContainer);
+    
+    // Style caption container (bottom center)
+    if (this.captionContainer) {
+      this.captionContainer.style.cssText = `
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        z-index: 2147483647 !important;
+        position: fixed !important;
+        bottom: 80px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        width: auto !important;
+        max-width: 90vw !important;
+        min-width: 200px !important;
+        background: rgba(0, 0, 0, 0.8) !important;
+        color: white !important;
+        padding: 12px 20px !important;
+        border-radius: 8px !important;
+        backdrop-filter: blur(10px) !important;
+        font-family: 'Segoe UI', Arial, sans-serif !important;
+        font-size: 18px !important;
+        line-height: 1.3 !important;
+        text-align: center !important;
+        pointer-events: none !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+        transition: opacity 0.2s ease !important;
+      `;
+    }
+    
+    // Style controls container (top right)  
+    if (this.controlsContainer) {
+      this.controlsContainer.style.cssText = `
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
@@ -300,178 +339,113 @@ class TranscriptionOverlay {
         position: fixed !important;
         top: 20px !important;
         right: 20px !important;
-        width: auto !important;
-        max-width: 80vw !important;
-        min-width: 300px !important;
         background: linear-gradient(135deg, rgba(0, 0, 0, 0.95), rgba(20, 20, 40, 0.95)) !important;
-        color: white !important;
-        padding: 20px !important;
-        border-radius: 12px !important;
+        padding: 12px !important;
+        border-radius: 8px !important;
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
         backdrop-filter: blur(10px) !important;
-        font-family: 'Segoe UI', Arial, sans-serif !important;
-        font-size: 16px !important;
-        line-height: 1.4 !important;
         pointer-events: auto !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        flex-direction: column !important;
-        gap: 12px !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+        gap: 8px !important;
       `;
-      
-      // Add CSS animations if not already added
-      if (!document.getElementById('lt-animations')) {
-        const style = document.createElement('style');
-        style.id = 'lt-animations';
-        style.textContent = `
-          @keyframes ltFlashComplete {
-            0% { background-color: rgba(76, 175, 80, 0.3); }
-            100% { background-color: transparent; }
-          }
-          
-          @keyframes ltWordAppear {
-            0% { opacity: 0; transform: translateY(-2px); }
-            100% { opacity: 1; transform: translateY(0); }
-          }
-          
-          .lt-word {
-            display: inline-block;
-            animation: ltWordAppear 0.3s ease-out forwards;
-            opacity: 0;
-          }
-          
-          .lt-final-text {
-            color: #4CAF50 !important;
-            font-weight: 500 !important;
-          }
-          
-          .lt-partial-text {
-            color: #FFC107 !important;
-            font-weight: 400 !important;
-          }
-          
-          .lt-caption-status.final {
-            color: #4CAF50 !important;
-            font-size: 12px !important;
-          }
-          
-          .lt-caption-status.partial {
-            color: #FFC107 !important;
-            font-size: 12px !important;
-            animation: pulse 1.5s ease-in-out infinite;
-          }
-          
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-          }
-        `;
-        document.head.appendChild(style);
-      }
-      this.isVisible = true;
-      console.log('DEBUG_OVERLAY: Overlay forced visible with cssText override');
-      
-      // Make children visible too
-      if (this.captionBox) {
-        this.captionBox.style.cssText = `
-          display: block !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          color: white !important;
-          margin-bottom: 10px !important;
-        `;
-      }
-      
-      // Style button container
-      const buttonContainer = this.overlayContainer.querySelector('.lt-button-container');
-      if (buttonContainer) {
-        buttonContainer.style.cssText = `
-          display: flex !important;
-          gap: 8px !important;
-          flex-wrap: wrap !important;
-        `;
-      }
-      
-      if (this.agentButton) {
-        this.agentButton.style.cssText = `
-          display: block !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          background: #4CAF50 !important;
-          color: white !important;
-          border: none !important;
-          padding: 8px 12px !important;
-          border-radius: 4px !important;
-          cursor: pointer !important;
-          font-size: 12px !important;
-          transition: background-color 0.2s !important;
-        `;
-      }
-      
-      if (this.stopButton) {
-        this.stopButton.style.cssText = `
-          ${this.isTranscribing ? 'display: block' : 'display: none'} !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          background: #f44336 !important;
-          color: white !important;
-          border: none !important;
-          padding: 8px 12px !important;
-          border-radius: 4px !important;
-          cursor: pointer !important;
-          font-size: 12px !important;
-          transition: background-color 0.2s !important;
-        `;
-      }
-      
-      // Double-check after a moment
-      setTimeout(() => {
-        const computed = window.getComputedStyle(this.overlayContainer);
-        console.log('DEBUG_OVERLAY: Computed styles after override:');
-        console.log('  display:', computed.display);
-        console.log('  visibility:', computed.visibility);
-        console.log('  opacity:', computed.opacity);
-        console.log('  zIndex:', computed.zIndex);
-        console.log('  position:', computed.position);
-        console.log('  top:', computed.top);
-        console.log('  right:', computed.right);
-        
-        // Check if it's actually in the DOM
-        const isInDOM = document.body.contains(this.overlayContainer);
-        console.log('DEBUG_OVERLAY: Is overlay in DOM?', isInDOM);
-        
-        // Check if any parent elements are hiding it
-        let parent = this.overlayContainer.parentElement;
-        let depth = 0;
-        while (parent && depth < 5) {
-          const parentStyles = window.getComputedStyle(parent);
-          console.log(`DEBUG_OVERLAY: Parent ${depth} (${parent.tagName}) - display: ${parentStyles.display}, visibility: ${parentStyles.visibility}, opacity: ${parentStyles.opacity}`);
-          parent = parent.parentElement;
-          depth++;
-        }
-      }, 100);
-    } else {
-      console.error('DEBUG_OVERLAY: overlayContainer is null!');
     }
+    
+    // Add CSS animations if not already added
+    if (!document.getElementById('lt-animations')) {
+      const style = document.createElement('style');
+      style.id = 'lt-animations';
+      style.textContent = `
+        .lt-final-text {
+          color: #4CAF50 !important;
+          font-weight: 500 !important;
+        }
+        
+        .lt-partial-text {
+          color: #FFC107 !important;
+          font-weight: 400 !important;
+        }
+        
+        .lt-caption-status.final {
+          color: #4CAF50 !important;
+          font-size: 12px !important;
+        }
+        
+        .lt-caption-status.partial {
+          color: #FFC107 !important;
+          font-size: 12px !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    
+    // Style caption elements
+    if (this.captionBox) {
+      this.captionBox.style.cssText = `
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        color: white !important;
+      `;
+    }
+    
+    // Style buttons
+    if (this.agentButton) {
+      this.agentButton.style.cssText = `
+        background: #4CAF50 !important;
+        color: white !important;
+        border: none !important;
+        padding: 8px 12px !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        font-size: 12px !important;
+        transition: background-color 0.2s !important;
+      `;
+    }
+    
+    if (this.stopButton) {
+      this.stopButton.style.cssText = `
+        ${this.isTranscribing ? 'display: inline-block' : 'display: none'} !important;
+        background: #f44336 !important;
+        color: white !important;
+        border: none !important;
+        padding: 8px 12px !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        font-size: 12px !important;
+        transition: background-color 0.2s !important;
+        margin-left: 8px !important;
+      `;
+    }
+    
+    this.isVisible = true;
+    console.log('DEBUG_OVERLAY: Both containers shown - captions at bottom, controls at top right');
   }
   
   hide() {
-    if (this.overlayContainer) {
-      this.overlayContainer.style.cssText = `
+    if (this.captionContainer) {
+      this.captionContainer.style.cssText = `
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
         pointer-events: none !important;
       `;
-      this.isVisible = false;
-      console.log('🔒 CONTENT: Overlay hidden');
     }
+    if (this.controlsContainer) {
+      this.controlsContainer.style.cssText = `
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      `;
+    }
+    this.isVisible = false;
+    console.log('🔒 CONTENT: Both overlay containers hidden');
   }
   
   forceHide() {
-    // Force hide overlay and ensure it stays hidden until explicitly shown
-    if (this.overlayContainer) {
-      this.overlayContainer.style.cssText = `
+    // Force hide both containers and ensure they stay hidden until explicitly shown
+    if (this.captionContainer) {
+      this.captionContainer.style.cssText = `
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -479,9 +453,19 @@ class TranscriptionOverlay {
         position: fixed !important;
         z-index: -1 !important;
       `;
-      this.isVisible = false;
-      console.log('🔒 CONTENT: Overlay force hidden - will only show during active transcription');
     }
+    if (this.controlsContainer) {
+      this.controlsContainer.style.cssText = `
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        position: fixed !important;
+        z-index: -1 !important;
+      `;
+    }
+    this.isVisible = false;
+    console.log('🔒 CONTENT: Both containers force hidden - will only show during active transcription');
   }
   
   showStopButton() {
@@ -635,9 +619,17 @@ class TranscriptionOverlay {
   destroy() {
     console.log('🗑️ DESTROY: Cleaning up transcription overlay...');
     
-    if (this.overlayContainer) {
+    if (this.captionContainer) {
+      this.captionContainer.remove();
+      console.log('🗑️ Removed caption container');
+    }
+    if (this.controlsContainer) {
+      this.controlsContainer.remove();
+      console.log('🗑️ Removed controls container');
+    }
+    if (this.overlayContainer && this.overlayContainer !== this.captionContainer) {
       this.overlayContainer.remove();
-      console.log('🗑️ Removed overlay container');
+      console.log('🗑️ Removed legacy overlay container');
     }
     if (this.agentDialog) {
       this.agentDialog.remove();
