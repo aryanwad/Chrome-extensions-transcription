@@ -221,34 +221,38 @@ class TranscriptionOverlay {
     if (text && text.trim()) {
       console.log('✏️ Updating caption with text:', text);
       
-      // YouTube-style smooth updates
+      // Clean caption updates with consistent white text
       if (isFinal) {
         console.log('💚 Rendering FINAL transcript');
-        // Final transcript - smooth transition without flickering
+        // Final transcript - clean white text
         captionText.innerHTML = `<span class="lt-final-text">${this.escapeHtml(text)}</span>`;
         captionStatus.textContent = '';
         captionStatus.className = 'lt-caption-status final';
         this.currentText = text;
         
-        // Subtle completion effect (less jarring than flash)
-        captionText.style.transition = 'color 0.5s ease';
-        captionText.style.color = '#4CAF50';
+        // Keep consistent styling
+        captionText.style.color = 'white';
+        captionText.style.opacity = '1';
+        captionText.style.transition = 'none';
         
-        // Auto-hide final transcript after a few seconds (YouTube behavior)
+        // Auto-fade final transcript after a few seconds
         setTimeout(() => {
           if (captionText.textContent === text) {
             captionText.style.opacity = '0.7';
           }
-        }, 3000);
+        }, 4000);
         
       } else {
         console.log('💛 Rendering PARTIAL transcript');
-        // Partial transcript - smooth update without word-by-word animation
+        // Partial transcript - clean white text
         captionText.innerHTML = `<span class="lt-partial-text">${this.escapeHtml(text)}</span>`;
         captionStatus.textContent = '';
         captionStatus.className = 'lt-caption-status partial';
+        
+        // Keep consistent styling
+        captionText.style.color = 'white';
         captionText.style.opacity = '1';
-        captionText.style.color = '#FFC107';
+        captionText.style.transition = 'none';
       }
       
       // No need to resize - captions are bottom-centered and auto-width
@@ -313,19 +317,18 @@ class TranscriptionOverlay {
         transform: translateX(-50%) !important;
         width: auto !important;
         max-width: 90vw !important;
-        min-width: 200px !important;
-        background: rgba(0, 0, 0, 0.8) !important;
+        min-width: auto !important;
+        background: rgba(0, 0, 0, 0.85) !important;
         color: white !important;
-        padding: 12px 20px !important;
-        border-radius: 8px !important;
-        backdrop-filter: blur(10px) !important;
+        padding: 8px 12px !important;
+        border-radius: 6px !important;
         font-family: 'Segoe UI', Arial, sans-serif !important;
-        font-size: 18px !important;
+        font-size: 26px !important;
         line-height: 1.3 !important;
         text-align: center !important;
         pointer-events: none !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
-        transition: opacity 0.2s ease !important;
+        border: none !important;
+        box-shadow: none !important;
       `;
     }
     
@@ -350,29 +353,27 @@ class TranscriptionOverlay {
       `;
     }
     
-    // Add CSS animations if not already added
+    // Add CSS for clean styling if not already added
     if (!document.getElementById('lt-animations')) {
       const style = document.createElement('style');
       style.id = 'lt-animations';
       style.textContent = `
         .lt-final-text {
-          color: #4CAF50 !important;
-          font-weight: 500 !important;
+          color: white !important;
+          font-weight: 400 !important;
         }
         
         .lt-partial-text {
-          color: #FFC107 !important;
+          color: white !important;
           font-weight: 400 !important;
         }
         
         .lt-caption-status.final {
-          color: #4CAF50 !important;
-          font-size: 12px !important;
+          display: none !important;
         }
         
         .lt-caption-status.partial {
-          color: #FFC107 !important;
-          font-size: 12px !important;
+          display: none !important;
         }
       `;
       document.head.appendChild(style);
@@ -385,6 +386,11 @@ class TranscriptionOverlay {
         visibility: visible !important;
         opacity: 1 !important;
         color: white !important;
+        background: none !important;
+        border: none !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
       `;
     }
     
