@@ -185,14 +185,8 @@ class OffscreenAudioProcessor {
       this.stopCapture();
     });
     
-    // Log audio activity for debugging
+    // Track chunk count for internal processing
     this.chunkCount = (this.chunkCount || 0) + 1;
-    if (audioData.amplitude > 100 && this.chunkCount % 20 === 0) {
-      console.log('🎵 OFFSCREEN: Active audio sent - chunk:', this.chunkCount, 
-                 'amplitude:', audioData.amplitude, 'samples:', audioData.data.length);
-    } else if (this.chunkCount % 100 === 0) {
-      console.log('🔇 OFFSCREEN: Audio chunk sent - total:', this.chunkCount);
-    }
   }
   
   stopCapture() {

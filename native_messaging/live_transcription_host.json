@@ -1,0 +1,9 @@
+{
+  "name": "live_transcription_host",
+  "description": "Native messaging host for Live Transcription catch-up processing",
+  "path": "/Users/aryanwad/final_live_transcribe/native_messaging/live_transcription_host.py",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID_HERE/"
+  ]
+}

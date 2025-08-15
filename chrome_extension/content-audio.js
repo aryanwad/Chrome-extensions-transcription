@@ -156,14 +156,8 @@ class AudioCapture {
       console.error('❌ AUDIO_CONTENT: Failed to send audio data to background:', error);
     });
     
-    // Log audio activity for debugging
+    // Track chunk count for internal processing
     this.chunkCount++;
-    if (audioData.amplitude > 100 && this.chunkCount % 20 === 0) {
-      console.log('🎵 AUDIO_CONTENT: Active audio sent - chunk:', this.chunkCount, 
-                 'amplitude:', audioData.amplitude, 'samples:', audioData.data.length);
-    } else if (this.chunkCount % 100 === 0) {
-      console.log('🔇 AUDIO_CONTENT: Audio chunk sent - total:', this.chunkCount);
-    }
   }
   
   stopCapture() {

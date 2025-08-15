@@ -159,19 +159,13 @@ class TranscriptionOverlay {
           break;
           
         case 'NEW_TRANSCRIPT':
-          console.log('🎯 NEW_TRANSCRIPT received:');
-          console.log('   Text:', `"${request.text}"`);
-          console.log('   isFinal:', request.isFinal);
-          console.log('   forceShow:', request.forceShow);
           
           // Always show overlay when we get transcript
           this.show();
           
           if (request.isFinal) {
-            console.log('💚 Displaying FINAL transcript:', request.text);
             this.updateCaption(request.text, true);
           } else {
-            console.log('💛 Displaying PARTIAL transcript:', request.text);
             this.updateCaption(request.text, false);
           }
           break;
@@ -588,11 +582,16 @@ class TranscriptionOverlay {
     this.catchupDialog.innerHTML = `
       <div class="lt-catchup-content">
         <div class="lt-catchup-header">
-          <h3>⚡ Stream Catch-Up</h3>
+          <h3>⚡ Smart Stream Catch-Up</h3>
           <button class="lt-close-btn" onclick="this.closest('.lt-catchup-dialog').remove()">×</button>
         </div>
         <div class="lt-catchup-body">
-          <p>Get an AI-powered summary of what you missed!</p>
+          <p>🎯 Get an AI-powered summary with deep links and key moments!</p>
+          <div class="feature-highlights">
+            <span class="feature-tag">🔗 VOD Deep Links</span>
+            <span class="feature-tag">⏰ Key Moments</span>
+            <span class="feature-tag">🤖 AI Analysis</span>
+          </div>
           <div class="lt-duration-options">
             <button class="lt-duration-btn" data-duration="30">
               <div class="duration-title">Last 30 Minutes</div>
@@ -790,6 +789,145 @@ class TranscriptionOverlay {
         font-size: 14px !important;
         font-weight: 600 !important;
       }
+      
+      .platform-badge {
+        display: inline-block !important;
+        padding: 4px 8px !important;
+        border-radius: 12px !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        margin-right: 8px !important;
+      }
+      
+      .platform-badge.twitch {
+        background: #9146ff !important;
+        color: white !important;
+      }
+      
+      .platform-badge.youtube {
+        background: #ff0000 !important;
+        color: white !important;
+      }
+      
+      .platform-badge.kick {
+        background: #53fc18 !important;
+        color: black !important;
+      }
+      
+      .platform-badge.unknown {
+        background: #666 !important;
+        color: white !important;
+      }
+      
+      .deep-link-badge {
+        display: inline-block !important;
+        padding: 4px 8px !important;
+        background: #ff9800 !important;
+        color: white !important;
+        border-radius: 12px !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+      }
+      
+      .summary-header {
+        display: flex !important;
+        align-items: center !important;
+        margin-bottom: 16px !important;
+        padding-bottom: 8px !important;
+        border-bottom: 1px solid #eee !important;
+      }
+      
+      .summary-content {
+        margin-bottom: 20px !important;
+        line-height: 1.6 !important;
+      }
+      
+      .stats-grid {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
+        gap: 8px !important;
+        margin-top: 8px !important;
+      }
+      
+      .stat-item {
+        display: flex !important;
+        flex-direction: column !important;
+        background: #f8f9fa !important;
+        padding: 8px !important;
+        border-radius: 6px !important;
+      }
+      
+      .stat-label {
+        font-size: 12px !important;
+        color: #666 !important;
+        margin-bottom: 2px !important;
+      }
+      
+      .stat-value {
+        font-weight: 600 !important;
+        color: #333 !important;
+        font-size: 14px !important;
+      }
+      
+      .vod-link {
+        display: inline-block !important;
+        padding: 10px 16px !important;
+        background: linear-gradient(135deg, #667eea, #764ba2) !important;
+        color: white !important;
+        text-decoration: none !important;
+        border-radius: 6px !important;
+        margin-top: 8px !important;
+        transition: transform 0.2s !important;
+      }
+      
+      .vod-link:hover {
+        transform: translateY(-1px) !important;
+      }
+      
+      .timestamp-link {
+        display: inline-block !important;
+        padding: 2px 6px !important;
+        background: #667eea !important;
+        color: white !important;
+        text-decoration: none !important;
+        border-radius: 4px !important;
+        font-size: 12px !important;
+        margin: 0 2px !important;
+      }
+      
+      .transcript-container {
+        max-height: 250px !important;
+        overflow-y: auto !important;
+        margin-top: 8px !important;
+        border: 1px solid #ddd !important;
+        border-radius: 6px !important;
+      }
+      
+      .transcript-text {
+        padding: 12px !important;
+        font-size: 12px !important;
+        line-height: 1.5 !important;
+        background: white !important;
+        color: #333 !important;
+      }
+      
+      .feature-highlights {
+        display: flex !important;
+        gap: 8px !important;
+        flex-wrap: wrap !important;
+        margin-top: 12px !important;
+      }
+      
+      .feature-tag {
+        display: inline-block !important;
+        padding: 4px 8px !important;
+        background: rgba(102, 126, 234, 0.1) !important;
+        color: #667eea !important;
+        border: 1px solid rgba(102, 126, 234, 0.2) !important;
+        border-radius: 12px !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -826,10 +964,16 @@ class TranscriptionOverlay {
         throw new Error(response.error || 'Failed to process catch-up request');
       }
       
-      console.log('✅ CATCHUP: Request initiated, task ID:', response.taskId);
-      
-      // Poll for progress updates
-      await this.pollCatchupProgress(response.taskId, progressFill, progressText, summaryContent, processingSection, resultSection);
+      // Check if we got immediate completion (serverless processing)
+      if (response.status === 'complete' && response.data) {
+        console.log('✅ CATCHUP: Processing completed immediately');
+        this.updateProgress(progressFill, progressText, 100, 'Processing complete!');
+        this.showCatchupResult(response.data, summaryContent, processingSection, resultSection);
+      } else {
+        // Fallback to old polling system if needed (backward compatibility)
+        console.log('✅ CATCHUP: Request initiated, task ID:', response.taskId);
+        await this.pollCatchupProgress(response.taskId, progressFill, progressText, summaryContent, processingSection, resultSection);
+      }
       
     } catch (error) {
       console.error('❌ CATCHUP: Error processing request:', error);
