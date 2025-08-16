@@ -1,152 +1,297 @@
-// Popup script for Live Transcription Assistant
+// Popup script for Live Transcription Assistant with Authentication
 class PopupController {
   constructor() {
+    this.backendUrl = 'https://gak2qkt4df.execute-api.us-east-1.amazonaws.com/dev';
+    this.currentUser = null;
+    this.isTranscribing = false;
+    
     this.elements = {
-      assemblyaiKey: document.getElementById('assemblyai-key'),
-      openaiKey: document.getElementById('openai-key'),
-      saveKeys: document.getElementById('save-keys'),
+      // Login/Signup sections
+      loginSection: document.getElementById('login-section'),
+      dashboardSection: document.getElementById('dashboard-section'),
+      
+      // Login form
+      loginForm: document.getElementById('login-form'),
+      signupForm: document.getElementById('signup-form'),
+      loginStatus: document.getElementById('login-status'),
+      
+      // Login fields
+      email: document.getElementById('email'),
+      password: document.getElementById('password'),
+      loginBtn: document.getElementById('login-btn'),
+      showSignup: document.getElementById('show-signup'),
+      showLogin: document.getElementById('show-login'),
+      
+      // Signup fields
+      signupName: document.getElementById('signup-name'),
+      signupEmail: document.getElementById('signup-email'),
+      signupPassword: document.getElementById('signup-password'),
+      signupBtn: document.getElementById('signup-btn'),
+      
+      // Dashboard elements
+      userEmail: document.getElementById('user-email'),
+      creditsBalance: document.getElementById('credits-balance'),
+      buyCredits: document.getElementById('buy-credits'),
+      logoutBtn: document.getElementById('logout-btn'),
+      
+      // Transcription controls
+      controlSection: document.getElementById('control-section'),
+      transcriptionStatus: document.getElementById('transcription-status'),
       startTranscription: document.getElementById('start-transcription'),
-      stopTranscription: document.getElementById('stop-transcription'),
-      statusDisplay: document.getElementById('status-display')
+      stopTranscription: document.getElementById('stop-transcription')
     };
     
-    this.isTranscribing = false;
     this.init();
   }
   
-  init() {
-    this.loadApiKeys();
+  async init() {
     this.setupEventListeners();
+    await this.checkAuthStatus();
     this.checkTranscriptionStatus();
   }
   
-  async loadApiKeys() {
+  setupEventListeners() {
+    // Login/Signup form toggles
+    this.elements.showSignup.addEventListener('click', () => {
+      this.elements.loginForm.classList.add('hidden');
+      this.elements.signupForm.classList.remove('hidden');
+    });
+    
+    this.elements.showLogin.addEventListener('click', () => {
+      this.elements.signupForm.classList.add('hidden');
+      this.elements.loginForm.classList.remove('hidden');
+    });
+    
+    // Authentication actions
+    this.elements.loginBtn.addEventListener('click', () => this.login());
+    this.elements.signupBtn.addEventListener('click', () => this.signup());
+    this.elements.logoutBtn.addEventListener('click', () => this.logout());
+    
+    // Transcription controls
+    this.elements.startTranscription.addEventListener('click', () => this.startTranscription());
+    this.elements.stopTranscription.addEventListener('click', () => this.stopTranscription());
+    
+    // Credits
+    this.elements.buyCredits.addEventListener('click', () => this.buyCredits());
+    
+    // Enter key support for login
+    this.elements.email.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.login();
+    });
+    
+    this.elements.password.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.login();
+    });
+    
+    // Enter key support for signup
+    this.elements.signupPassword.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.signup();
+    });
+  }
+  
+  async checkAuthStatus() {
     try {
-      const result = await chrome.storage.local.get(['assemblyAiKey', 'openAiKey']);
-      
-      if (result.assemblyAiKey) {
-        this.elements.assemblyaiKey.value = result.assemblyAiKey;
-      }
-      if (result.openAiKey) {
-        this.elements.openaiKey.value = result.openAiKey;
+      const userAuth = await this.getUserAuth();
+      if (userAuth && userAuth.token) {
+        // Verify token is still valid
+        const userInfo = await this.apiCall('/auth/user', 'GET', null, userAuth.token);
+        if (userInfo) {
+          this.currentUser = userInfo;
+          this.showDashboard();
+          await this.loadCreditsBalance();
+        } else {
+          // Token invalid, clear auth
+          await this.clearUserAuth();
+          this.showLogin();
+        }
+      } else {
+        this.showLogin();
       }
     } catch (error) {
-      console.error('Failed to load API keys:', error);
+      console.error('Auth check failed:', error);
+      this.showLogin();
     }
   }
   
-  setupEventListeners() {
-    // Save API keys
-    this.elements.saveKeys.addEventListener('click', () => {
-      this.saveApiKeys();
-    });
+  async login() {
+    const email = this.elements.email.value.trim();
+    const password = this.elements.password.value.trim();
     
-    // Start transcription
-    this.elements.startTranscription.addEventListener('click', () => {
-      this.startTranscription();
-    });
-    
-    // Stop transcription
-    this.elements.stopTranscription.addEventListener('click', () => {
-      this.stopTranscription();
-    });
-    
-    // External links
-    document.querySelectorAll('.link[data-url]').forEach(link => {
-      link.addEventListener('click', (e) => {
-        chrome.tabs.create({ url: e.target.dataset.url });
-      });
-    });
-    
-    // Enter key support
-    this.elements.assemblyaiKey.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        this.saveApiKeys();
-      }
-    });
-    
-    this.elements.openaiKey.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        this.saveApiKeys();
-      }
-    });
-  }
-  
-  async saveApiKeys() {
-    const assemblyAiKey = this.elements.assemblyaiKey.value.trim();
-    const openAiKey = this.elements.openaiKey.value.trim();
-    
-    if (!assemblyAiKey || !openAiKey) {
-      this.showStatus('Please enter both API keys', 'error');
+    if (!email || !password) {
+      this.showLoginStatus('Please enter both email and password', 'error');
       return;
     }
     
     try {
-      // Show loading state
-      this.elements.saveKeys.disabled = true;
-      this.elements.saveKeys.innerHTML = '<span class="loading"></span>Saving...';
+      this.setLoginLoading(true);
       
-      // Send to background script
-      const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({
-          type: 'SAVE_API_KEYS',
-          assemblyAiKey: assemblyAiKey,
-          openAiKey: openAiKey
-        }, resolve);
+      const response = await this.apiCall('/auth/login', 'POST', {
+        email,
+        password
       });
       
-      if (response.success) {
-        this.showStatus('API keys saved successfully!', 'success');
+      if (response && response.user && response.user.token) {
+        // Save auth data
+        await this.saveUserAuth({
+          token: response.user.token,
+          user: response.user
+        });
+        
+        this.currentUser = response.user;
+        this.showDashboard();
+        await this.loadCreditsBalance();
+        this.showLoginStatus('Login successful!', 'success');
       } else {
-        this.showStatus('Failed to save API keys', 'error');
+        this.showLoginStatus('Invalid email or password', 'error');
       }
     } catch (error) {
-      console.error('Error saving API keys:', error);
-      this.showStatus('Error saving API keys', 'error');
+      console.error('Login error:', error);
+      this.showLoginStatus('Login failed: ' + error.message, 'error');
     } finally {
-      this.elements.saveKeys.disabled = false;
-      this.elements.saveKeys.textContent = 'Save API Keys';
+      this.setLoginLoading(false);
+    }
+  }
+  
+  async signup() {
+    const name = this.elements.signupName.value.trim();
+    const email = this.elements.signupEmail.value.trim();
+    const password = this.elements.signupPassword.value.trim();
+    
+    if (!name || !email || !password) {
+      this.showLoginStatus('Please fill in all fields', 'error');
+      return;
+    }
+    
+    if (password.length < 8) {
+      this.showLoginStatus('Password must be at least 8 characters', 'error');
+      return;
+    }
+    
+    try {
+      this.setSignupLoading(true);
+      
+      const response = await this.apiCall('/auth/register', 'POST', {
+        name,
+        email,
+        password
+      });
+      
+      if (response && response.user && response.user.token) {
+        // Save auth data
+        await this.saveUserAuth({
+          token: response.user.token,
+          user: response.user
+        });
+        
+        this.currentUser = response.user;
+        this.showDashboard();
+        await this.loadCreditsBalance();
+        this.showLoginStatus('Account created successfully! You received 200 free credits!', 'success');
+      } else {
+        this.showLoginStatus('Account creation failed', 'error');
+      }
+    } catch (error) {
+      console.error('Signup error:', error);
+      if (error.message.includes('email already exists')) {
+        this.showLoginStatus('An account with this email already exists', 'error');
+      } else {
+        this.showLoginStatus('Signup failed: ' + error.message, 'error');
+      }
+    } finally {
+      this.setSignupLoading(false);
+    }
+  }
+  
+  async logout() {
+    await this.clearUserAuth();
+    this.currentUser = null;
+    this.showLogin();
+    this.clearForms();
+    this.showLoginStatus('Logged out successfully', 'success');
+  }
+  
+  async loadCreditsBalance() {
+    try {
+      const userAuth = await this.getUserAuth();
+      if (!userAuth || !userAuth.token) return;
+      
+      const response = await this.apiCall('/credits/balance', 'GET', null, userAuth.token);
+      if (response && typeof response.balance === 'number') {
+        this.elements.creditsBalance.textContent = response.balance.toLocaleString();
+        
+        // Enable/disable transcription based on credits
+        if (response.balance > 0) {
+          this.elements.startTranscription.disabled = false;
+          this.updateInstructions('2. Navigate to a tab with audio content');
+        } else {
+          this.elements.startTranscription.disabled = true;
+          this.updateInstructions('2. You need credits to start transcription');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load credits balance:', error);
+      this.elements.creditsBalance.textContent = 'Error';
+    }
+  }
+  
+  async buyCredits() {
+    try {
+      const userAuth = await this.getUserAuth();
+      if (!userAuth || !userAuth.token) return;
+      
+      this.elements.buyCredits.disabled = true;
+      this.elements.buyCredits.innerHTML = '<span class="loading"></span>Creating checkout...';
+      
+      const response = await this.apiCall('/credits/purchase', 'POST', {
+        package_id: 'starter_pack' // Default package
+      }, userAuth.token);
+      
+      if (response && response.checkout_url) {
+        // Open Stripe checkout in new tab
+        chrome.tabs.create({ url: response.checkout_url });
+        this.showTranscriptionStatus('Checkout opened in new tab. Credits will be added after payment.', 'info');
+      } else {
+        this.showTranscriptionStatus('Failed to create checkout session', 'error');
+      }
+    } catch (error) {
+      console.error('Purchase error:', error);
+      this.showTranscriptionStatus('Purchase failed: ' + error.message, 'error');
+    } finally {
+      this.elements.buyCredits.disabled = false;
+      this.elements.buyCredits.textContent = '💰 Buy More Credits';
     }
   }
   
   async startTranscription() {
-    // Validate API keys first
-    const assemblyAiKey = this.elements.assemblyaiKey.value.trim();
-    const openAiKey = this.elements.openaiKey.value.trim();
-    
-    if (!assemblyAiKey || !openAiKey) {
-      this.showStatus('Please enter and save your API keys first', 'error');
-      return;
-    }
-    
     try {
-      // Show loading state
-      this.elements.startTranscription.disabled = true;
-      this.elements.startTranscription.innerHTML = '<span class="loading"></span>Starting...';
+      // Check user is authenticated
+      const userAuth = await this.getUserAuth();
+      if (!userAuth || !userAuth.token) {
+        this.showTranscriptionStatus('Please login first', 'error');
+        return;
+      }
       
-      // Check if current tab is valid for transcription
+      // Check credits balance
+      await this.loadCreditsBalance();
+      const creditsText = this.elements.creditsBalance.textContent;
+      const credits = parseInt(creditsText.replace(/,/g, ''));
+      if (credits <= 0) {
+        this.showTranscriptionStatus('Insufficient credits. Please purchase more credits to continue.', 'error');
+        return;
+      }
+      
+      this.setTranscriptionLoading(true);
+      
+      // Get current tab
       const tabs = await chrome.tabs.query({active: true, currentWindow: true});
       const currentTab = tabs[0];
       
       if (!currentTab || currentTab.url.startsWith('chrome://')) {
-        this.showStatus('Please navigate to a webpage with audio/video content', 'warning');
+        this.showTranscriptionStatus('Please navigate to a webpage with audio/video content', 'warning');
         return;
       }
       
-      // Show helpful message for media tabs
-      const isMediaTab = currentTab.url.includes('youtube.com') || 
-                        currentTab.url.includes('netflix.com') ||
-                        currentTab.url.includes('twitch.tv') ||
-                        currentTab.url.includes('vimeo.com') ||
-                        currentTab.audible;
-      
-      if (isMediaTab) {
-        this.showStatus('🎵 Ready to transcribe this media tab!', 'info');
-      } else {
-        this.showStatus('📄 Ready to transcribe this tab (make sure it has audio)', 'info');
-      }
-      
-      // Test if content script is available
+      // Test content script availability
       console.log('POPUP: Testing content script availability...');
       const pingResponse = await new Promise((resolve) => {
         chrome.tabs.sendMessage(currentTab.id, { type: 'PING' }, (response) => {
@@ -161,8 +306,7 @@ class PopupController {
       });
       
       if (!pingResponse) {
-        console.warn('POPUP: Content script not responding, may need injection...');
-        // Try to inject content scripts manually
+        console.warn('POPUP: Content script not responding, injecting...');
         try {
           await chrome.scripting.executeScript({
             target: { tabId: currentTab.id },
@@ -173,8 +317,6 @@ class PopupController {
             files: ['overlay.css']
           });
           console.log('POPUP: Content scripts injected manually');
-          
-          // Wait a moment for scripts to initialize
           await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (injectionError) {
           console.error('POPUP: Failed to inject content scripts:', injectionError);
@@ -182,119 +324,193 @@ class PopupController {
         }
       }
       
-      // Get tab capture stream ID in popup context (required for user interaction)
-      console.log('POPUP: Getting tab capture stream ID for tab:', currentTab.id);
-      
-      let streamId;
-      try {
-        streamId = await new Promise((resolve, reject) => {
-          // Check if chrome.tabCapture is available
-          if (!chrome.tabCapture || !chrome.tabCapture.getMediaStreamId) {
-            reject(new Error('Chrome Tab Capture API not available. Please update Chrome to version 116 or later.'));
+      // Get tab capture stream ID
+      console.log('POPUP: Getting tab capture stream ID...');
+      const streamId = await new Promise((resolve, reject) => {
+        if (!chrome.tabCapture || !chrome.tabCapture.getMediaStreamId) {
+          reject(new Error('Chrome Tab Capture API not available. Please update Chrome to version 116 or later.'));
+          return;
+        }
+
+        chrome.tabCapture.getMediaStreamId({
+          targetTabId: currentTab.id
+        }, (streamId) => {
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message;
+            if (errorMessage.includes('Permission dismissed')) {
+              reject(new Error('Permission was dismissed. Please try again and allow tab capture.'));
+            } else if (errorMessage.includes('tab is not audible')) {
+              reject(new Error('This tab is not playing audio. Please navigate to a page with audio content.'));
+            } else {
+              reject(new Error(errorMessage));
+            }
             return;
           }
-
-          console.log('POPUP: Requesting stream ID with getMediaStreamId...');
-          chrome.tabCapture.getMediaStreamId({
-            targetTabId: currentTab.id
-          }, (streamId) => {
-            if (chrome.runtime.lastError) {
-              console.error('POPUP: getMediaStreamId error:', chrome.runtime.lastError);
-              
-              // Provide user-friendly error messages
-              let errorMessage = chrome.runtime.lastError.message;
-              if (errorMessage.includes('Permission dismissed')) {
-                errorMessage = 'Permission was dismissed. Please click the extension button again and allow tab capture when prompted.';
-              } else if (errorMessage.includes('tab is not audible')) {
-                errorMessage = 'This tab is not playing audio. Please navigate to a page with audio content (like YouTube, Netflix, etc.) and try again.';
-              } else if (errorMessage.includes('Invalid tab')) {
-                errorMessage = 'Cannot capture this tab. Please try on a regular webpage with audio content.';
-              }
-              
-              reject(new Error(errorMessage));
-              return;
-            }
-            
-            if (!streamId) {
-              reject(new Error('No stream ID received from Chrome. Please ensure the tab has audio content and try again.'));
-              return;
-            }
-            
-            console.log('POPUP: Successfully got stream ID:', streamId);
-            resolve(streamId);
-          });
+          
+          if (!streamId) {
+            reject(new Error('No stream ID received. Please ensure the tab has audio content.'));
+            return;
+          }
+          
+          resolve(streamId);
         });
-      } catch (error) {
-        console.error('POPUP: Stream ID error:', error);
-        this.showStatus(error.message, 'error');
-        this.elements.startTranscription.disabled = false;
-        this.elements.startTranscription.textContent = 'Start Transcription';
-        return;
-      }
-
-      // Send start transcription message with stream ID (back to original approach)
-      console.log('POPUP: Sending transcription start request with stream ID...');
+      });
+      
+      // Send start transcription request
       const response = await new Promise((resolve) => {
         chrome.runtime.sendMessage({
           type: 'START_TRANSCRIPTION',
           streamId: streamId,
-          tabId: currentTab.id
+          tabId: currentTab.id,
+          userToken: userAuth.token
         }, resolve);
       });
-      
-      console.log('POPUP: Background response:', response);
       
       if (response && response.success) {
         this.isTranscribing = true;
         this.updateUIForTranscription(true);
-        this.showStatus('🎤 Transcription started! Audio will be restored shortly...', 'success');
-        console.log('POPUP: ✅ Transcription started successfully');
+        this.showTranscriptionStatus('🎤 Transcription started! Audio will be restored shortly...', 'success');
         
-        // Show helpful info about audio behavior
         setTimeout(() => {
-          this.showStatus('📺 Live captions active! Audio should now be playing normally.', 'info');
+          this.showTranscriptionStatus('📺 Live captions active! Audio should now be playing normally.', 'info');
         }, 2000);
+        
+        // Refresh credits balance after starting (credits will be deducted)
+        setTimeout(() => this.loadCreditsBalance(), 3000);
       } else {
         const errorMsg = response?.error || 'Unknown error occurred';
-        console.error('POPUP: ❌ Transcription failed:', errorMsg);
-        this.showStatus(`Failed to start transcription: ${errorMsg}`, 'error');
+        this.showTranscriptionStatus(`Failed to start: ${errorMsg}`, 'error');
       }
     } catch (error) {
       console.error('Error starting transcription:', error);
-      this.showStatus('Error starting transcription: ' + error.message, 'error');
+      this.showTranscriptionStatus('Error: ' + error.message, 'error');
     } finally {
-      this.elements.startTranscription.disabled = false;
-      this.elements.startTranscription.textContent = 'Start Transcription';
+      this.setTranscriptionLoading(false);
     }
   }
   
   async stopTranscription() {
     try {
-      // Show loading state
-      this.elements.stopTranscription.disabled = true;
-      this.elements.stopTranscription.innerHTML = '<span class="loading"></span>Stopping...';
+      this.setStopLoading(true);
       
-      // Send stop transcription message
       const response = await new Promise((resolve) => {
         chrome.runtime.sendMessage({
           type: 'STOP_TRANSCRIPTION'
         }, resolve);
       });
       
-      if (response.success) {
+      if (response && response.success) {
         this.isTranscribing = false;
         this.updateUIForTranscription(false);
-        this.showStatus('Transcription stopped', 'success');
+        this.showTranscriptionStatus('Transcription stopped', 'success');
+        
+        // Refresh credits balance
+        setTimeout(() => this.loadCreditsBalance(), 1000);
       } else {
-        this.showStatus('Failed to stop transcription', 'error');
+        this.showTranscriptionStatus('Failed to stop transcription', 'error');
       }
     } catch (error) {
       console.error('Error stopping transcription:', error);
-      this.showStatus('Error stopping transcription', 'error');
+      this.showTranscriptionStatus('Error stopping transcription', 'error');
     } finally {
-      this.elements.stopTranscription.disabled = false;
-      this.elements.stopTranscription.textContent = 'Stop Transcription';
+      this.setStopLoading(false);
     }
+  }
+  
+  // API Helper Methods
+  async apiCall(endpoint, method = 'GET', data = null, token = null) {
+    const url = `${this.backendUrl}${endpoint}`;
+    const options = {
+      method,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+    
+    if (token) {
+      options.headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    if (data) {
+      options.body = JSON.stringify(data);
+    }
+    
+    const response = await fetch(url, options);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+  
+  // Storage Helper Methods
+  async getUserAuth() {
+    const result = await chrome.storage.local.get(['userAuth']);
+    return result.userAuth || null;
+  }
+  
+  async saveUserAuth(authData) {
+    await chrome.storage.local.set({ userAuth: authData });
+  }
+  
+  async clearUserAuth() {
+    await chrome.storage.local.remove(['userAuth']);
+  }
+  
+  // UI Helper Methods
+  showLogin() {
+    this.elements.loginSection.classList.remove('hidden');
+    this.elements.dashboardSection.classList.add('hidden');
+    this.elements.startTranscription.disabled = true;
+    this.updateInstructions('1. Login above to get started');
+  }
+  
+  showDashboard() {
+    this.elements.loginSection.classList.add('hidden');
+    this.elements.dashboardSection.classList.remove('hidden');
+    this.elements.userEmail.textContent = this.currentUser.email;
+    this.updateInstructions('2. Navigate to a tab with audio content');
+  }
+  
+  clearForms() {
+    this.elements.email.value = '';
+    this.elements.password.value = '';
+    this.elements.signupName.value = '';
+    this.elements.signupEmail.value = '';
+    this.elements.signupPassword.value = '';
+  }
+  
+  updateInstructions(step2Text) {
+    const instructionElement = document.querySelector('.small-text p');
+    if (instructionElement) {
+      instructionElement.textContent = step2Text;
+    }
+  }
+  
+  setLoginLoading(loading) {
+    this.elements.loginBtn.disabled = loading;
+    this.elements.loginBtn.innerHTML = loading ? 
+      '<span class="loading"></span>Logging in...' : 'Login';
+  }
+  
+  setSignupLoading(loading) {
+    this.elements.signupBtn.disabled = loading;
+    this.elements.signupBtn.innerHTML = loading ? 
+      '<span class="loading"></span>Creating account...' : 'Create Account';
+  }
+  
+  setTranscriptionLoading(loading) {
+    this.elements.startTranscription.disabled = loading;
+    this.elements.startTranscription.innerHTML = loading ? 
+      '<span class="loading"></span>Starting...' : 'Start Transcription';
+  }
+  
+  setStopLoading(loading) {
+    this.elements.stopTranscription.disabled = loading;
+    this.elements.stopTranscription.innerHTML = loading ? 
+      '<span class="loading"></span>Stopping...' : 'Stop Transcription';
   }
   
   updateUIForTranscription(isTranscribing) {
@@ -307,26 +523,34 @@ class PopupController {
     }
   }
   
-  showStatus(message, type) {
-    this.elements.statusDisplay.textContent = message;
-    this.elements.statusDisplay.className = `status ${type}`;
-    this.elements.statusDisplay.classList.remove('hidden');
+  showLoginStatus(message, type) {
+    this.elements.loginStatus.textContent = message;
+    this.elements.loginStatus.className = `status ${type}`;
+    this.elements.loginStatus.classList.remove('hidden');
     
-    // Auto-hide after 5 seconds
     setTimeout(() => {
-      this.elements.statusDisplay.classList.add('hidden');
+      this.elements.loginStatus.classList.add('hidden');
+    }, 5000);
+  }
+  
+  showTranscriptionStatus(message, type) {
+    this.elements.transcriptionStatus.textContent = message;
+    this.elements.transcriptionStatus.className = `status ${type}`;
+    this.elements.transcriptionStatus.classList.remove('hidden');
+    
+    setTimeout(() => {
+      this.elements.transcriptionStatus.classList.add('hidden');
     }, 5000);
   }
   
   checkTranscriptionStatus() {
-    // Check if transcription is already running
     chrome.runtime.sendMessage({
       type: 'GET_TRANSCRIPTION_STATUS'
     }, (response) => {
       if (response && response.isTranscribing) {
         this.isTranscribing = true;
         this.updateUIForTranscription(true);
-        this.showStatus('Transcription is running', 'success');
+        this.showTranscriptionStatus('Transcription is running', 'success');
       }
     });
   }
@@ -337,4 +561,4 @@ document.addEventListener('DOMContentLoaded', () => {
   new PopupController();
 });
 
-console.log('🎤 Live Transcription popup loaded');
+console.log('🎤 Live Transcription popup loaded with authentication');

@@ -23,6 +23,148 @@ This is a **fully functional Chrome Extension** for live transcription that capt
 6. **Complete Shutdown**: ✅ All resources properly cleaned up when stopped
 7. **AssemblyAI Integration**: ✅ Real-time streaming with proper PCM16 format
 8. **Ask Agent Feature**: ✅ GPT-4 Q&A about transcription content
+9. **🆕 Native Messaging Catch-Up**: ✅ Local processing with yt-dlp for MP3 download + AI transcription
+10. **🆕 Twitch Catch-Up**: ✅ AWS Lambda VOD detection → Native messaging MP3 download → AssemblyAI + OpenAI
+11. **🆕 Dynamic Extension ID Setup**: ✅ Automatic detection and setup scripts for any user
+12. **🆕 Comprehensive Documentation**: ✅ Complete README with installation and usage guides
+
+## 🚀 CHROME WEB STORE DEPLOYMENT TODO LIST
+
+### HIGH PRIORITY - Security & Monetization (CRITICAL FOR STORE DEPLOYMENT)
+
+#### 🔐 **Remove Hardcoded API Keys** (MUST DO FIRST)
+**Current Issue**: API keys are hardcoded in `background.js` and `live_transcription_host.py`
+**Files to Update**:
+- `chrome_extension/background.js` lines 35-36: Remove hardcoded AssemblyAI and OpenAI keys
+- `native_messaging/live_transcription_host.py` lines 27-28: Remove hardcoded API keys
+**Action**: Replace with calls to secure backend API proxy service
+
+#### 🏗️ **Create Secure Backend API Proxy Service** 
+**Technology Stack**: Vercel serverless functions (for MVP) or AWS Lambda + API Gateway (for scale)
+**Required Endpoints**:
+- `POST /api/auth/login` - User authentication with Google/email
+- `POST /api/auth/register` - New user signup with 200 free credits
+- `GET /api/user/credits` - Check user's current credit balance
+- `POST /api/transcription/stream` - Real-time transcription proxy to AssemblyAI
+- `POST /api/transcription/catchup` - Catch-up processing proxy (AssemblyAI + OpenAI)
+- `POST /api/credits/purchase` - Stripe payment integration for credit purchases
+- `GET /api/usage/stats` - User usage analytics
+
+**Database Schema Needed**:
+```sql
+users (id, email, google_id, credits_balance, created_at, subscription_tier)
+usage_logs (id, user_id, service_type, credits_used, timestamp, metadata)
+transactions (id, user_id, amount, credits_purchased, stripe_payment_id, status)
+```
+
+#### 💳 **Credit-Based Payment System**
+**Credit Pricing Model**:
+- **Free Signup**: 200 credits (≈20 minutes live transcription)
+- **Live Transcription**: 10 credits per minute
+- **Catch-up 30min**: 300 credits (10 credits/min consistency)
+- **Credit Packages**:
+  - Starter: $2.99 for 500 credits
+  - Popular: $9.99 for 2000 credits 
+  - Power: $19.99 for 5000 credits
+
+**Integration Requirements**:
+- Stripe checkout integration
+- Webhook handlers for payment confirmation
+- Credit balance management
+- Usage tracking and deduction
+
+#### 🔄 **Update Chrome Extension Architecture**
+**Remove Dependencies**:
+- Remove hardcoded API keys completely
+- Remove direct API calls to AssemblyAI/OpenAI
+- Update all API calls to use backend proxy
+
+**Add New Features**:
+- User authentication flow (Google OAuth + email/password)
+- Credit balance display in popup
+- Purchase credits button/flow
+- Usage tracking and limits
+- Error handling for insufficient credits
+
+**Files to Modify**:
+- `background.js`: Replace API calls with backend proxy calls
+- `popup.js/html`: Add login, credit display, purchase options
+- `content.js`: Add credit warnings for low balance users
+- New file: `auth.js` for user authentication management
+
+### MEDIUM PRIORITY - Platform Testing & Monetization
+
+#### 🧪 **Test YouTube Live Catch-Up Functionality**
+**Current Status**: Implemented but not fully tested
+**Testing Requirements**:
+- Test with active YouTube live streams
+- Verify VOD URL detection works for YouTube
+- Test yt-dlp compatibility with YouTube live streams
+- Confirm audio extraction and transcription quality
+- Document any YouTube-specific limitations or issues
+
+#### 🧪 **Test Kick Streaming Catch-Up Functionality** 
+**Current Status**: Basic implementation, needs verification
+**Testing Requirements**:
+- Test with active Kick streams
+- Verify platform detection logic works correctly
+- Test yt-dlp compatibility with Kick platform
+- Document any Kick-specific requirements or limitations
+- Ensure consistent user experience across platforms
+
+#### 📢 **Ad Monetization Integration**
+**Strategy**: Non-intrusive ads for free tier users to supplement credit system
+**Implementation Options**:
+- Google AdSense integration in extension popup
+- Sponsored content in transcription overlay ("Powered by...")
+- Interstitial ads between transcription sessions
+- Banner ads for free users (removed for premium)
+
+**Technical Requirements**:
+- Chrome extension ad policy compliance
+- Non-intrusive ad placement
+- Ad-free experience for paid users
+- Revenue tracking and optimization
+
+### LOW PRIORITY - Enhancements & Polish
+
+#### 🎨 **Chrome Web Store Assets**
+- Extension icons (16x16, 48x48, 128x128)
+- Store screenshots and promotional images
+- Store description and feature highlights
+- Privacy policy and terms of service
+- Support documentation and FAQ
+
+#### 📊 **Admin Dashboard**
+- User management and analytics
+- Usage monitoring and cost tracking
+- Revenue reporting and metrics
+- Credit transaction history
+- System health monitoring
+
+#### 🔧 **Enhanced Error Handling**
+- Better user feedback for common issues
+- Automatic retry logic for API failures
+- Graceful degradation when services are down
+- Comprehensive logging for debugging
+
+## Implementation Order (Recommended):
+
+1. **Remove hardcoded API keys** (CRITICAL - security issue)
+2. **Create backend API proxy service** (Core functionality)
+3. **Implement user authentication** (Required for credit system)
+4. **Add credit tracking and payment** (Monetization core)
+5. **Update Chrome extension** (Remove API dependencies)
+6. **Test platform catch-up features** (Quality assurance)
+7. **Add ad monetization** (Additional revenue stream)
+8. **Create store assets and deploy** (Final deployment)
+
+## Success Metrics for Chrome Web Store:
+- **User Acquisition**: Target 1000+ active users in first 3 months
+- **Revenue**: Break-even at ~50 regular users ($500/month revenue)
+- **Usage**: Average 20+ minutes transcription per user per month
+- **Retention**: 30%+ monthly active user retention
+- **Reviews**: Maintain 4.5+ star rating with quality user experience
 
 ## Architecture Overview
 

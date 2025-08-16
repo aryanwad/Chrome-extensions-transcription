@@ -1,0 +1,256 @@
+service: live-transcription-backend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  
+  environment:
+    STAGE: ${self:provider.stage}
+    DYNAMODB_TABLE_USERS: ${self:service}-users-${self:provider.stage}
+    DYNAMODB_TABLE_USAGE: ${self:service}-usage-${self:provider.stage}
+    DYNAMODB_TABLE_TRANSACTIONS: ${self:service}-transactions-${self:provider.stage}
+    
+    # Secure API Keys (use serverless-dotenv-plugin or AWS Systems Manager)
+    ASSEMBLYAI_API_KEY: ${env:ASSEMBLYAI_API_KEY}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    STRIPE_SECRET_KEY: sk_test_placeholder
+    STRIPE_WEBHOOK_SECRET: whsec_placeholder
+    JWT_SECRET: ${env:JWT_SECRET}
+    
+    # Twitch API credentials for catch-up functionality
+    TWITCH_CLIENT_ID: ${env:TWITCH_CLIENT_ID}
+    TWITCH_CLIENT_SECRET: ${env:TWITCH_CLIENT_SECRET}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: 
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USERS}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USAGE}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_TRANSACTIONS}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USERS}/index/*"
+
+functions:
+  # Authentication Functions
+  register:
+    handler: src/auth.register
+    events:
+      - http:
+          path: auth/register
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  login:
+    handler: src/auth.login
+    events:
+      - http:
+          path: auth/login
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  getUser:
+    handler: src/auth.get_user
+    events:
+      - http:
+          path: auth/user
+          method: get
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Transcription Service Functions
+  streamTranscription:
+    handler: src/transcription.stream_proxy
+    timeout: 30
+    events:
+      - http:
+          path: transcription/stream
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  catchupTranscription:
+    handler: src/transcription.catchup_proxy
+    timeout: 300  # 5 minutes for catch-up processing
+    events:
+      - http:
+          path: transcription/catchup
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  askTranscription:
+    handler: src/transcription.ask_proxy
+    timeout: 30
+    events:
+      - http:
+          path: transcription/ask
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Credit Management Functions
+  getCredits:
+    handler: src/credits.get_balance
+    events:
+      - http:
+          path: credits/balance
+          method: get
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  purchaseCredits:
+    handler: src/credits.purchase
+    events:
+      - http:
+          path: credits/purchase
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Stripe Webhook Handler
+  stripeWebhook:
+    handler: src/webhooks.stripe_handler
+    events:
+      - http:
+          path: webhooks/stripe
+          method: post
+
+  # Analytics Functions
+  getUsage:
+    handler: src/analytics.get_usage
+    events:
+      - http:
+          path: analytics/usage
+          method: get
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Health Check
+  health:
+    handler: src/health.check
+    events:
+      - http:
+          path: health
+          method: get
+          cors: true
+
+resources:
+  Resources:
+    # DynamoDB Tables
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_USERS}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: user_id
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: user_id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: EmailIndex
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    UsageTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_USAGE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: user_id
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: S
+        KeySchema:
+          - AttributeName: user_id
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+
+    TransactionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_TRANSACTIONS}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: transaction_id
+            AttributeType: S
+          - AttributeName: user_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: transaction_id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: UserIndex
+            KeySchema:
+              - AttributeName: user_id
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: false
+    slim: true
+    strip: false
+    pythonBin: python3

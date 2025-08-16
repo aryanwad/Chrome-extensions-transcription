@@ -159,14 +159,19 @@ class TranscriptionOverlay {
           break;
           
         case 'NEW_TRANSCRIPT':
+          console.log('🎤 CONTENT: NEW_TRANSCRIPT received:', {
+            transcript: request.transcript,
+            isFinal: request.isFinal,
+            confidence: request.confidence
+          });
           
           // Always show overlay when we get transcript
           this.show();
           
           if (request.isFinal) {
-            this.updateCaption(request.text, true);
+            this.updateCaption(request.transcript, true);
           } else {
-            this.updateCaption(request.text, false);
+            this.updateCaption(request.transcript, false);
           }
           break;
           

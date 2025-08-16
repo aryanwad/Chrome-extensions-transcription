@@ -1,0 +1,23 @@
+{
+  "name": "live-transcription-backend",
+  "version": "1.0.0",
+  "description": "AWS Lambda backend for Live Transcription Chrome Extension",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "serverless deploy",
+    "deploy-dev": "serverless deploy --stage dev",
+    "deploy-prod": "serverless deploy --stage prod",
+    "remove": "serverless remove",
+    "logs": "serverless logs -f",
+    "test": "python -m pytest tests/",
+    "local": "serverless offline"
+  },
+  "devDependencies": {
+    "serverless": "^3.38.0",
+    "serverless-dotenv-plugin": "^6.0.0",
+    "serverless-offline": "^13.3.0",
+    "serverless-python-requirements": "^6.0.0"
+  },
+  "author": "Live Transcription",
+  "license": "ISC"
+}

@@ -167,6 +167,9 @@ class OffscreenAudioProcessor {
       return;
     }
     
+    // Debug: Log audio data flow
+    console.log('OFFSCREEN: Handling audio data, amplitude:', audioData.amplitude);
+    
     // Send audio data to background service worker
     chrome.runtime.sendMessage({
       type: 'AUDIO_DATA_FROM_OFFSCREEN',

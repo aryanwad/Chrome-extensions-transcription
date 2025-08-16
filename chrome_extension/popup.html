@@ -58,7 +58,7 @@
       font-weight: 500;
     }
     
-    input[type="text"], input[type="password"] {
+    input[type="text"], input[type="password"], input[type="email"] {
       width: 100%;
       padding: 10px;
       border: 1px solid rgba(255, 255, 255, 0.2);
@@ -69,11 +69,11 @@
       box-sizing: border-box;
     }
     
-    input[type="text"]::placeholder, input[type="password"]::placeholder {
+    input::placeholder {
       color: rgba(255, 255, 255, 0.6);
     }
     
-    input[type="text"]:focus, input[type="password"]:focus {
+    input:focus {
       outline: none;
       border-color: rgba(255, 255, 255, 0.4);
       background: rgba(255, 255, 255, 0.15);
@@ -120,6 +120,16 @@
     .btn-danger:hover {
       background: #dc2626;
       transform: translateY(-1px);
+    }
+    
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.2);
     }
     
     .btn:disabled {
@@ -192,6 +202,28 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    
+    .credits-display {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+      margin-bottom: 15px;
+    }
+    
+    .credits-number {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fbbf24;
+    }
+    
+    .user-info {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -201,23 +233,59 @@
   </div>
   
   <div class="content">
-    <!-- Setup Section -->
-    <div id="setup-section" class="section">
-      <h3>⚙️ Setup</h3>
-      <div class="form-group">
-        <label for="assemblyai-key">AssemblyAI API Key</label>
-        <input type="password" id="assemblyai-key" placeholder="Enter your AssemblyAI API key">
+    <!-- Login Section -->
+    <div id="login-section" class="section">
+      <h3>🔐 Login Required</h3>
+      <div id="login-status" class="status hidden"></div>
+      
+      <div id="login-form">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" placeholder="Enter your email">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Enter your password">
+        </div>
+        <button id="login-btn" class="btn btn-primary">Login</button>
+        <button id="show-signup" class="btn btn-secondary">Create Account</button>
       </div>
-      <div class="form-group">
-        <label for="openai-key">OpenAI API Key</label>
-        <input type="password" id="openai-key" placeholder="Enter your OpenAI API key">
+      
+      <div id="signup-form" class="hidden">
+        <div class="form-group">
+          <label for="signup-name">Name</label>
+          <input type="text" id="signup-name" placeholder="Enter your name">
+        </div>
+        <div class="form-group">
+          <label for="signup-email">Email</label>
+          <input type="email" id="signup-email" placeholder="Enter your email">
+        </div>
+        <div class="form-group">
+          <label for="signup-password">Password</label>
+          <input type="password" id="signup-password" placeholder="Create a password (8+ characters)">
+        </div>
+        <button id="signup-btn" class="btn btn-primary">Create Account</button>
+        <button id="show-login" class="btn btn-secondary">Back to Login</button>
+        <div class="small-text">
+          <p>✨ Get 200 free credits when you sign up!</p>
+        </div>
       </div>
-      <button id="save-keys" class="btn btn-primary">Save API Keys</button>
-      <div class="small-text">
-        <p>Need API keys? Get them from:</p>
-        <p><span class="link" data-url="https://www.assemblyai.com/dashboard">AssemblyAI Dashboard</span></p>
-        <p><span class="link" data-url="https://platform.openai.com/api-keys">OpenAI API Keys</span></p>
+    </div>
+    
+    <!-- Dashboard Section (shown when logged in) -->
+    <div id="dashboard-section" class="section hidden">
+      <div id="user-info" class="user-info">
+        <strong id="user-email"></strong>
       </div>
+      
+      <div class="credits-display">
+        <div>💳 Credits Balance</div>
+        <div class="credits-number" id="credits-balance">0</div>
+        <div class="small-text">10 credits = 1 minute transcription</div>
+      </div>
+      
+      <button id="buy-credits" class="btn btn-primary">💰 Buy More Credits</button>
+      <button id="logout-btn" class="btn btn-secondary">Logout</button>
     </div>
     
     <div class="divider"></div>
@@ -225,12 +293,13 @@
     <!-- Control Section -->
     <div id="control-section" class="section">
       <h3>🎬 Transcription</h3>
-      <div id="status-display" class="status hidden"></div>
-      <button id="start-transcription" class="btn btn-success">Start Transcription</button>
+      <div id="transcription-status" class="status hidden"></div>
+      <button id="start-transcription" class="btn btn-success" disabled>Start Transcription</button>
       <button id="stop-transcription" class="btn btn-danger hidden">Stop Transcription</button>
       <div class="small-text">
-        <p>1. Make sure this tab has audio playing (YouTube, Twitch, etc.)</p>
-        <p>2. ⚠️ <strong>IMPORTANT:</strong> Check "Share audio" when Chrome asks what to share!</p>
+        <p>1. Login above to get started</p>
+        <p>2. Make sure this tab has audio playing</p>
+        <p>3. ⚠️ Check "Share audio" when Chrome asks!</p>
       </div>
     </div>
     
@@ -240,12 +309,12 @@
     <div class="section">
       <h3>ℹ️ How it works</h3>
       <div class="small-text">
-        <p>1. Enter your API keys above</p>
-        <p>2. Navigate to a page with audio/video</p>
-        <p>3. Click "Start Transcription"</p>
+        <p>1. 🔐 Login with your account (no API keys needed!)</p>
+        <p>2. 🎵 Navigate to a page with audio/video</p>
+        <p>3. ▶️ Click "Start Transcription"</p>
         <p>4. ⚠️ <strong>Check "Share audio"</strong> in Chrome dialog</p>
-        <p>5. Captions will appear as an overlay</p>
-        <p>6. Use the "Ask Agent" button for AI assistance</p>
+        <p>5. 📱 Captions appear as overlay + Ask Agent button</p>
+        <p>6. ⚡ Use catch-up feature for past stream content</p>
       </div>
     </div>
   </div>
