@@ -1,0 +1,20 @@
+# AWS Serverless Framework files (contain sensitive deployment data)
+.serverless/
+
+# Environment files
+.env
+
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

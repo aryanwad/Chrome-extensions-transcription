@@ -171,6 +171,12 @@ def deduct_credits(user_id: str, credits_to_deduct: int, service_type: str, meta
         user_data = response['Item']
         current_balance = user_data.get('credits_balance', 0)
         
+        # Admin users have unlimited credits - don't deduct anything
+        if user_data.get('is_admin', False):
+            # Log usage for admin but don't deduct credits
+            log_usage(user_id, service_type, credits_to_deduct, metadata)
+            return True
+        
         # Check if user has enough credits
         if current_balance < credits_to_deduct:
             return False
@@ -262,7 +268,13 @@ def check_credits(user_id: str, required_credits: int) -> tuple[bool, int]:
         if 'Item' not in response:
             return False, 0
         
-        current_balance = response['Item'].get('credits_balance', 0)
+        user_data = response['Item']
+        current_balance = user_data.get('credits_balance', 0)
+        
+        # Admin users have unlimited credits
+        if user_data.get('is_admin', False):
+            return True, 999999  # Always return true for admin with high balance display
+        
         return current_balance >= required_credits, current_balance
         
     except Exception as e:

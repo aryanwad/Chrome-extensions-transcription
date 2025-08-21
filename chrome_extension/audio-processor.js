@@ -12,12 +12,12 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       if (event.data.type === 'START') {
         this.isProcessing = true;
-        console.log('WORKLET: Audio processing started');
+        // Remove debug logging
       } else if (event.data.type === 'STOP') {
         this.isProcessing = false;
         this.buffer = []; // Clear buffer
         this.resampleBuffer = []; // Clear resample buffer
-        console.log('WORKLET: Audio processing stopped and buffers cleared');
+        // Remove debug logging
       }
     };
   }

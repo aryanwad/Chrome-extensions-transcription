@@ -139,15 +139,20 @@ def register(event, context):
         user_id = str(uuid.uuid4())
         hashed_password = hash_password(password)
         
+        # Check if this is an admin email
+        admin_emails = ['aryanwadhwa234@gmail.com']
+        is_admin = email in admin_emails
+        
         user_data = {
             'user_id': user_id,
             'email': email,
             'name': name,
             'password_hash': hashed_password,
-            'credits_balance': 200,  # Free signup credits
+            'credits_balance': 999999 if is_admin else 200,  # Unlimited credits for admin, 200 for regular users
             'created_at': datetime.utcnow().isoformat(),
-            'subscription_tier': 'free',
+            'subscription_tier': 'admin' if is_admin else 'free',
             'is_active': True,
+            'is_admin': is_admin,
             'total_credits_purchased': 0,
             'total_usage': 0
         }
@@ -163,8 +168,9 @@ def register(event, context):
             'user_id': user_id,
             'email': email,
             'name': name,
-            'credits_balance': 200,
-            'subscription_tier': 'free',
+            'credits_balance': user_data['credits_balance'],
+            'subscription_tier': user_data['subscription_tier'],
+            'is_admin': is_admin,
             'token': token
         }
         
@@ -236,6 +242,7 @@ def login(event, context):
             'name': user_data.get('name', ''),
             'credits_balance': user_data.get('credits_balance', 0),
             'subscription_tier': user_data.get('subscription_tier', 'free'),
+            'is_admin': user_data.get('is_admin', False),
             'token': token
         }
         
@@ -283,7 +290,8 @@ def get_user(event, context):
             'subscription_tier': user_data.get('subscription_tier', 'free'),
             'created_at': user_data.get('created_at'),
             'total_usage': user_data.get('total_usage', 0),
-            'is_active': user_data.get('is_active', True)
+            'is_active': user_data.get('is_active', True),
+            'is_admin': user_data.get('is_admin', False)
         }
         
         return lambda_response(200, {'user': response_data})

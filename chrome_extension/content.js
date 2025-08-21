@@ -17,7 +17,7 @@ class TranscriptionOverlay {
     if (window.location.protocol === 'chrome-extension:' || 
         window.location.protocol === 'chrome:' ||
         window.location.hostname === 'chrome.google.com') {
-      console.log('❌ CONTENT: Skipping overlay init on:', window.location.href);
+      
       return;
     }
     
@@ -30,8 +30,8 @@ class TranscriptionOverlay {
     // IMPORTANT: Hide overlay by default - only show when transcription is active
     this.forceHide();
     
-    console.log('🎤 CONTENT: Live Transcription overlay initialized on:', window.location.href);
-    console.log('🔒 CONTENT: Overlay hidden by default - will show only during active transcription');
+    
+    
   }
   
   cleanupExistingOverlays() {
@@ -49,7 +49,7 @@ class TranscriptionOverlay {
     overlaySelectors.forEach(selector => {
       const elements = document.querySelectorAll(selector);
       elements.forEach(element => {
-        console.log('🗑️ CLEANUP: Removing element:', element.id || element.className || element.tagName);
+        // Remove debug logging
         element.remove();
         removedCount++;
       });
@@ -59,14 +59,14 @@ class TranscriptionOverlay {
     const existingStyles = document.querySelectorAll('#lt-animations, style[id*="lt-"], style[id*="transcription"]');
     existingStyles.forEach(style => {
       style.remove();
-      console.log('🗑️ CLEANUP: Removed style element:', style.id);
+      // Remove debug logging
       removedCount++;
     });
     
     if (removedCount > 0) {
-      console.log(`🧹 CLEANUP: Removed ${removedCount} overlay elements and styles`);
+      // Remove debug logging
     } else {
-      console.log('✅ CLEANUP: No existing overlays found');
+      // Remove debug logging
     }
   }
   
@@ -134,20 +134,20 @@ class TranscriptionOverlay {
   
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      console.log('🎭 CONTENT SCRIPT received message:', request);
+      
       
       switch (request.type) {
         case 'TRANSCRIPTION_STARTED':
-          console.log('🟢 CONTENT: TRANSCRIPTION_STARTED - showing overlay');
+          
           this.isTranscribing = true;
           this.show();
           this.showStopButton();
           this.updateCaption('🟢 Live transcription active...', false);
-          console.log('✅ CONTENT: Overlay shown for active transcription');
+          
           break;
           
         case 'TRANSCRIPTION_STATUS':
-          console.log('📊 TRANSCRIPTION_STATUS:', request.isRunning);
+          // Remove debug logging
           this.isTranscribing = request.isRunning;
           if (request.isRunning) {
             this.show();
@@ -176,19 +176,19 @@ class TranscriptionOverlay {
           break;
           
         case 'TRANSCRIPTION_STOPPED':
-          console.log('🔴 CONTENT: TRANSCRIPTION_STOPPED');
+          
           this.isTranscribing = false;
           this.hideStopButton();
           this.updateCaption('🔴 Transcription stopped', false);
           // Hide overlay after showing stop message briefly
           setTimeout(() => {
             this.forceHide();
-            console.log('🔒 CONTENT: Overlay hidden after transcription stopped');
+            
           }, 2000);
           break;
           
         case 'AUDIO_CAPTURE_ERROR':
-          console.log('❌ AUDIO_CAPTURE_ERROR:', request.error);
+          // Remove debug logging
           this.isTranscribing = false;
           this.updateCaption('❌ ' + request.error, false);
           if (request.error.includes('Share audio')) {
@@ -199,11 +199,11 @@ class TranscriptionOverlay {
           break;
           
         case 'PING':
-          console.log('🏓 PING received');
+          // Remove debug logging
           break;
       }
       
-      console.log('📤 Content script responding with success');
+      // Remove debug logging
       sendResponse({success: true, received: request.type});
     });
   }
@@ -225,11 +225,11 @@ class TranscriptionOverlay {
     }
     
     if (text && text.trim()) {
-      console.log('✏️ Updating caption with text:', text);
+      // Remove debug logging
       
       // Clean caption updates with consistent white text
       if (isFinal) {
-        console.log('💚 Rendering FINAL transcript');
+        // Remove debug logging
         // Final transcript - clean white text
         captionText.innerHTML = `<span class="lt-final-text">${this.escapeHtml(text)}</span>`;
         captionStatus.textContent = '';
@@ -249,7 +249,7 @@ class TranscriptionOverlay {
         }, 4000);
         
       } else {
-        console.log('💛 Rendering PARTIAL transcript');
+        // Remove debug logging
         // Partial transcript - clean white text
         captionText.innerHTML = `<span class="lt-partial-text">${this.escapeHtml(text)}</span>`;
         captionStatus.textContent = '';
@@ -263,7 +263,7 @@ class TranscriptionOverlay {
       
       // No need to resize - captions are bottom-centered and auto-width
       
-      console.log('✅ Caption updated successfully');
+      // Remove debug logging
     } else {
       console.warn('⚠️ Empty or whitespace-only text provided:', `"${text}"`);
     }
@@ -456,7 +456,7 @@ class TranscriptionOverlay {
     }
     
     this.isVisible = true;
-    console.log('DEBUG_OVERLAY: Both containers shown - captions at bottom, controls at top right');
+    // Remove debug logging
   }
   
   hide() {
@@ -477,7 +477,7 @@ class TranscriptionOverlay {
       `;
     }
     this.isVisible = false;
-    console.log('🔒 CONTENT: Both overlay containers hidden');
+    
   }
   
   forceHide() {
@@ -503,25 +503,25 @@ class TranscriptionOverlay {
       `;
     }
     this.isVisible = false;
-    console.log('🔒 CONTENT: Both containers force hidden - will only show during active transcription');
+    
   }
   
   showStopButton() {
     if (this.stopButton) {
       this.stopButton.style.display = 'block';
-      console.log('✅ Stop button shown');
+      // Remove debug logging
     }
   }
   
   hideStopButton() {
     if (this.stopButton) {
       this.stopButton.style.display = 'none';
-      console.log('🔒 Stop button hidden');
+      // Remove debug logging
     }
   }
   
   async stopTranscription() {
-    console.log('🛑 CONTENT: Stop transcription button clicked');
+    
     
     try {
       // Immediately update UI to show stopping state
@@ -541,7 +541,7 @@ class TranscriptionOverlay {
         });
       });
       
-      console.log('🛑 CONTENT: Stop transcription response:', response);
+      
       
       if (response && response.success) {
         this.isTranscribing = false;
@@ -551,7 +551,7 @@ class TranscriptionOverlay {
         // Hide overlay after showing success message
         setTimeout(() => {
           this.forceHide();
-          console.log('🔒 CONTENT: Overlay hidden after user-initiated stop');
+          
         }, 1500);
       } else {
         console.error('❌ CONTENT: Failed to stop transcription:', response?.error || 'Unknown error');
@@ -948,7 +948,7 @@ class TranscriptionOverlay {
       
       // Get current tab URL
       const currentUrl = window.location.href;
-      console.log('🎯 CATCHUP: Processing request for URL:', currentUrl, 'Duration:', duration + 'min');
+      // Remove debug logging
       
       // Send request to background script
       const response = await new Promise((resolve, reject) => {
@@ -971,12 +971,12 @@ class TranscriptionOverlay {
       
       // Check if we got immediate completion (serverless processing)
       if (response.status === 'complete' && response.data) {
-        console.log('✅ CATCHUP: Processing completed immediately');
+        // Remove debug logging
         this.updateProgress(progressFill, progressText, 100, 'Processing complete!');
         this.showCatchupResult(response.data, summaryContent, processingSection, resultSection);
       } else {
         // Fallback to old polling system if needed (backward compatibility)
-        console.log('✅ CATCHUP: Request initiated, task ID:', response.taskId);
+        // Remove debug logging
         await this.pollCatchupProgress(response.taskId, progressFill, progressText, summaryContent, processingSection, resultSection);
       }
       
@@ -1056,7 +1056,7 @@ class TranscriptionOverlay {
     summaryContent.innerHTML = this.formatSummaryResult(result);
     resultSection.style.display = 'block';
     
-    console.log('✅ CATCHUP: Results displayed successfully');
+    // Remove debug logging
   }
   
   formatSummaryResult(result) {
@@ -1163,51 +1163,51 @@ class TranscriptionOverlay {
   
   // Handle page navigation
   destroy() {
-    console.log('🗑️ DESTROY: Cleaning up transcription overlay...');
+    // Remove debug logging
     
     if (this.captionContainer) {
       this.captionContainer.remove();
-      console.log('🗑️ Removed caption container');
+      // Remove debug logging
     }
     if (this.controlsContainer) {
       this.controlsContainer.remove();
-      console.log('🗑️ Removed controls container');
+      // Remove debug logging
     }
     if (this.overlayContainer && this.overlayContainer !== this.captionContainer) {
       this.overlayContainer.remove();
-      console.log('🗑️ Removed legacy overlay container');
+      // Remove debug logging
     }
     if (this.agentDialog) {
       this.agentDialog.remove();
-      console.log('🗑️ Removed agent dialog');
+      // Remove debug logging
     }
     
     // Clean up any remaining elements
     this.cleanupExistingOverlays();
     
-    console.log('✅ DESTROY: Cleanup complete');
+    // Remove debug logging
   }
   
   // Static method to clean up all overlays (can be called from console)
   static cleanupAllOverlays() {
-    console.log('🧹 STATIC CLEANUP: Removing all Live Transcription overlays...');
+    // Remove debug logging
     
     const allOverlays = document.querySelectorAll('#live-transcription-overlay, .lt-overlay-container, .lt-agent-dialog, [id*="live-transcription"], [class*="lt-"]');
-    console.log('🔍 Found', allOverlays.length, 'overlay elements to remove');
+    // Remove debug logging
     
     allOverlays.forEach((element, index) => {
-      console.log(`🗑️ Removing element ${index + 1}:`, element.id || element.className || element.tagName);
+      // Remove debug logging
       element.remove();
     });
     
     // Remove animation styles
     const styles = document.querySelectorAll('#lt-animations, [id*="lt-"], style[id*="transcription"]');
     styles.forEach(style => {
-      console.log('🗑️ Removing style:', style.id);
+      // Remove debug logging
       style.remove();
     });
     
-    console.log('✅ STATIC CLEANUP: All overlays removed');
+    // Remove debug logging
     return `Removed ${allOverlays.length} overlay elements and ${styles.length} style elements`;
   }
 }
@@ -1234,5 +1234,4 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-console.log('🎤 Live Transcription content script loaded (overlay will remain hidden until transcription starts)');
-console.log('💡 TIP: To manually clean up overlays, run: cleanupLiveTranscriptionOverlays() in console');
+// Remove debug logging

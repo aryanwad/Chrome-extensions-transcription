@@ -38,7 +38,14 @@ class PopupController {
       controlSection: document.getElementById('control-section'),
       transcriptionStatus: document.getElementById('transcription-status'),
       startTranscription: document.getElementById('start-transcription'),
-      stopTranscription: document.getElementById('stop-transcription')
+      stopTranscription: document.getElementById('stop-transcription'),
+      
+      // Catch-up controls
+      catchupUrl: document.getElementById('catchup-url'),
+      catchupDuration: document.getElementById('catchup-duration'),
+      startCatchup: document.getElementById('start-catchup'),
+      catchupStatus: document.getElementById('catchup-status'),
+      catchupResult: document.getElementById('catchup-result')
     };
     
     this.init();
@@ -70,6 +77,9 @@ class PopupController {
     // Transcription controls
     this.elements.startTranscription.addEventListener('click', () => this.startTranscription());
     this.elements.stopTranscription.addEventListener('click', () => this.stopTranscription());
+    
+    // Catch-up controls
+    this.elements.startCatchup.addEventListener('click', () => this.startCatchup());
     
     // Credits
     this.elements.buyCredits.addEventListener('click', () => this.buyCredits());
@@ -217,10 +227,15 @@ class PopupController {
       
       const response = await this.apiCall('/credits/balance', 'GET', null, userAuth.token);
       if (response && typeof response.balance === 'number') {
-        this.elements.creditsBalance.textContent = response.balance.toLocaleString();
+        // Show unlimited for admin users
+        if (this.currentUser && this.currentUser.is_admin) {
+          this.elements.creditsBalance.textContent = '∞ UNLIMITED';
+        } else {
+          this.elements.creditsBalance.textContent = response.balance.toLocaleString();
+        }
         
-        // Enable/disable transcription based on credits
-        if (response.balance > 0) {
+        // Enable/disable transcription based on credits (admin always enabled)
+        if (response.balance > 0 || (this.currentUser && this.currentUser.is_admin)) {
           this.elements.startTranscription.disabled = false;
           this.updateInstructions('2. Navigate to a tab with audio content');
         } else {
@@ -271,13 +286,17 @@ class PopupController {
         return;
       }
       
-      // Check credits balance
+      // Check credits balance (skip for admin users)
       await this.loadCreditsBalance();
       const creditsText = this.elements.creditsBalance.textContent;
-      const credits = parseInt(creditsText.replace(/,/g, ''));
-      if (credits <= 0) {
-        this.showTranscriptionStatus('Insufficient credits. Please purchase more credits to continue.', 'error');
-        return;
+      
+      // Admin users have unlimited credits
+      if (!this.currentUser.is_admin) {
+        const credits = parseInt(creditsText.replace(/,/g, ''));
+        if (credits <= 0) {
+          this.showTranscriptionStatus('Insufficient credits. Please purchase more credits to continue.', 'error');
+          return;
+        }
       }
       
       this.setTranscriptionLoading(true);
@@ -417,6 +436,137 @@ class PopupController {
     }
   }
   
+  async startCatchup() {
+    const streamUrl = this.elements.catchupUrl.value.trim();
+    const duration = parseInt(this.elements.catchupDuration.value);
+    
+    if (!streamUrl) {
+      this.showCatchupStatus('Please enter a stream URL', 'error');
+      return;
+    }
+    
+    // Check if user is authenticated
+    const userAuth = await this.getUserAuth();
+    if (!userAuth || !userAuth.token) {
+      this.showCatchupStatus('Please login first', 'error');
+      return;
+    }
+    
+    try {
+      // Check credits balance before starting (skip for admin)
+      await this.loadCreditsBalance();
+      const creditsText = this.elements.creditsBalance.textContent;
+      const creditsNeeded = duration === 30 ? 300 : 600;
+      
+      // Admin users bypass credit checks
+      if (!this.currentUser.is_admin) {
+        const currentCredits = parseInt(creditsText.replace(/,/g, ''));
+        if (currentCredits < creditsNeeded) {
+          this.showCatchupStatus(`Insufficient credits. Need ${creditsNeeded} credits, have ${currentCredits}`, 'error');
+          return;
+        }
+      }
+      
+      // Show loading state
+      this.elements.startCatchup.disabled = true;
+      this.elements.startCatchup.innerHTML = '<span class="loading"></span>Processing...';
+      this.elements.catchupResult.classList.add('hidden');
+      
+      this.showCatchupStatus('🔍 Finding recent stream content...', 'info');
+      
+      // Send catch-up request to background script with timeout handling
+      let response;
+      try {
+        response = await new Promise((resolve, reject) => {
+        // Set up a timeout to prevent hanging
+        const timeoutId = setTimeout(() => {
+          console.error('⏰ POPUP: Catch-up request timed out after 5 minutes');
+          reject(new Error('Request timed out. Please try again.'));
+        }, 5 * 60 * 1000); // 5 minute timeout
+        
+        try {
+          chrome.runtime.sendMessage({
+            type: 'REQUEST_CATCHUP',
+            streamUrl: streamUrl,
+            duration: duration
+          }, (response) => {
+            clearTimeout(timeoutId);
+            
+            // Check for Chrome runtime errors
+            if (chrome.runtime.lastError) {
+              console.error('❌ POPUP: Chrome runtime error:', chrome.runtime.lastError);
+              reject(new Error('Communication error: ' + chrome.runtime.lastError.message));
+              return;
+            }
+            
+            // Check if response exists
+            if (!response) {
+              console.error('❌ POPUP: No response received from background script');
+              reject(new Error('No response from background script. Please try refreshing the extension.'));
+              return;
+            }
+            
+            console.log('✅ POPUP: Received response from background script');
+            resolve(response);
+          });
+        } catch (error) {
+          clearTimeout(timeoutId);
+          console.error('❌ POPUP: Error sending message:', error);
+          reject(error);
+        }
+      });
+      } catch (messageError) {
+        console.error('❌ POPUP: Message communication error:', messageError);
+        this.showCatchupStatus(`Communication error: ${messageError.message}`, 'error');
+        return;
+      }
+      
+      if (response && response.success) {
+        this.showCatchupStatus('✅ Summary generated successfully!', 'success');
+        
+        // Debug: Log the response structure to help diagnose issues
+        console.log('🔍 POPUP: Full catch-up response structure:', response);
+        console.log('🔍 POPUP: Response.data structure:', response.data);
+        
+        // Display the result - handle different response structures
+        let summaryText = '';
+        if (response.data && response.data.summary) {
+          // Backend response structure: { success: true, data: { summary: '...' } }
+          console.log('✅ POPUP: Using response.data.summary');
+          summaryText = response.data.summary;
+        } else if (response.data && response.data.data && response.data.data.summary) {
+          // Nested structure: { success: true, data: { data: { summary: '...' } } }
+          console.log('✅ POPUP: Using response.data.data.summary');
+          summaryText = response.data.data.summary;
+        } else if (response.summary) {
+          // Direct summary: { success: true, summary: '...' }
+          console.log('✅ POPUP: Using response.summary');
+          summaryText = response.summary;
+        } else {
+          // Fallback - show full transcript if no summary
+          console.log('⚠️ POPUP: Using fallback - no summary found, trying transcript');
+          summaryText = response.data?.transcript || response.data?.data?.transcript || 'Processing completed, but summary not available.';
+        }
+        
+        console.log('📝 POPUP: Final summary text length:', summaryText.length);
+        this.elements.catchupResult.textContent = summaryText;
+        this.elements.catchupResult.classList.remove('hidden');
+        
+        // Refresh credits balance
+        setTimeout(() => this.loadCreditsBalance(), 2000);
+      } else {
+        const errorMsg = response?.error || 'Catch-up processing failed';
+        this.showCatchupStatus(`Failed: ${errorMsg}`, 'error');
+      }
+    } catch (error) {
+      console.error('Catch-up error:', error);
+      this.showCatchupStatus(`Error: ${error.message}`, 'error');
+    } finally {
+      this.elements.startCatchup.disabled = false;
+      this.elements.startCatchup.textContent = 'Get Summary';
+    }
+  }
+  
   // API Helper Methods
   async apiCall(endpoint, method = 'GET', data = null, token = null) {
     const url = `${this.backendUrl}${endpoint}`;
@@ -470,7 +620,14 @@ class PopupController {
   showDashboard() {
     this.elements.loginSection.classList.add('hidden');
     this.elements.dashboardSection.classList.remove('hidden');
-    this.elements.userEmail.textContent = this.currentUser.email;
+    
+    // Show admin badge if user is admin
+    let emailDisplay = this.currentUser.email;
+    if (this.currentUser.is_admin) {
+      emailDisplay += ' 👑 ADMIN';
+    }
+    this.elements.userEmail.textContent = emailDisplay;
+    
     this.updateInstructions('2. Navigate to a tab with audio content');
   }
   
@@ -540,6 +697,16 @@ class PopupController {
     
     setTimeout(() => {
       this.elements.transcriptionStatus.classList.add('hidden');
+    }, 5000);
+  }
+  
+  showCatchupStatus(message, type) {
+    this.elements.catchupStatus.textContent = message;
+    this.elements.catchupStatus.className = `status ${type}`;
+    this.elements.catchupStatus.classList.remove('hidden');
+    
+    setTimeout(() => {
+      this.elements.catchupStatus.classList.add('hidden');
     }, 5000);
   }
   

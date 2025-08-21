@@ -18,7 +18,11 @@
     "http://*/*",
     "https://streaming.assemblyai.com/*",
     "https://api.assemblyai.com/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://id.twitch.tv/*",
+    "https://api.twitch.tv/*",
+    "https://usher.ttvnw.net/*",
+    "https://gak2qkt4df.execute-api.us-east-1.amazonaws.com/*"
   ],
   "background": {
     "service_worker": "background.js"

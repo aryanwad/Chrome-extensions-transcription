@@ -10,7 +10,9 @@ import requests
 import tempfile
 import subprocess
 import time
-from datetime import datetime
+import base64
+import boto3
+from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from .auth import authenticate_request, lambda_response, convert_decimals
@@ -21,6 +23,10 @@ ASSEMBLYAI_API_KEY = os.environ['ASSEMBLYAI_API_KEY']
 OPENAI_API_KEY = os.environ['OPENAI_API_KEY']
 TWITCH_CLIENT_ID = os.environ['TWITCH_CLIENT_ID']
 TWITCH_CLIENT_SECRET = os.environ['TWITCH_CLIENT_SECRET']
+S3_BUCKET_AUDIO = os.environ['S3_BUCKET_AUDIO']
+
+# Initialize S3 client
+s3_client = boto3.client('s3')
 
 def stream_proxy(event, context):
     """
@@ -41,8 +47,8 @@ def stream_proxy(event, context):
         action = body.get('action', 'start')
         
         if action == 'start':
-            # Check if user has sufficient credits (minimum 10 for 1 minute)
-            if user_data.get('credits_balance', 0) < 10:
+            # Check if user has sufficient credits (minimum 10 for 1 minute) - skip for admin users
+            if not user_data.get('is_admin', False) and user_data.get('credits_balance', 0) < 10:
                 return lambda_response(402, {'error': 'Insufficient credits. Minimum 10 credits required to start transcription.'})
             
             # Return API key for direct connection
@@ -476,7 +482,13 @@ def transcribe_audio_file(audio_file_path: str) -> str:
     Transcribe audio file using AssemblyAI
     """
     try:
+        print(f"🔄 TRANSCRIBE: Starting transcription for file: {audio_file_path}")
+        print(f"📊 TRANSCRIBE: File exists: {os.path.exists(audio_file_path)}")
+        if os.path.exists(audio_file_path):
+            print(f"📊 TRANSCRIBE: File size: {os.path.getsize(audio_file_path)} bytes")
+        
         # Upload file to AssemblyAI
+        print(f"📤 TRANSCRIBE: Uploading to AssemblyAI...")
         with open(audio_file_path, 'rb') as f:
             upload_response = requests.post(
                 'https://api.assemblyai.com/v2/upload',
@@ -485,24 +497,34 @@ def transcribe_audio_file(audio_file_path: str) -> str:
                 timeout=60
             )
         
+        print(f"📨 TRANSCRIBE: Upload response status: {upload_response.status_code}")
         if upload_response.status_code != 200:
+            print(f"❌ TRANSCRIBE: Upload failed: {upload_response.text}")
             return None
         
-        audio_url = upload_response.json()['upload_url']
+        upload_data = upload_response.json()
+        audio_url = upload_data['upload_url']
+        print(f"✅ TRANSCRIBE: File uploaded successfully: {audio_url[:50]}...")
         
         # Start transcription
+        print(f"🔄 TRANSCRIBE: Starting transcription job...")
         transcript_response = requests.post(
             'https://api.assemblyai.com/v2/transcript',
             json={'audio_url': audio_url},
             headers={'authorization': ASSEMBLYAI_API_KEY}
         )
         
+        print(f"📨 TRANSCRIBE: Transcript job response status: {transcript_response.status_code}")
         if transcript_response.status_code != 200:
+            print(f"❌ TRANSCRIBE: Transcript job failed: {transcript_response.text}")
             return None
         
-        transcript_id = transcript_response.json()['id']
+        transcript_data = transcript_response.json()
+        transcript_id = transcript_data['id']
+        print(f"✅ TRANSCRIBE: Transcript job started: {transcript_id}")
         
         # Poll for completion
+        print(f"⏳ TRANSCRIBE: Polling for completion...")
         for i in range(120):  # 10 minutes max
             status_response = requests.get(
                 f'https://api.assemblyai.com/v2/transcript/{transcript_id}',
@@ -511,18 +533,28 @@ def transcribe_audio_file(audio_file_path: str) -> str:
             
             if status_response.status_code == 200:
                 status_data = status_response.json()
+                print(f"📊 TRANSCRIBE: Poll {i+1}/120 - Status: {status_data.get('status', 'unknown')}")
                 
                 if status_data['status'] == 'completed':
-                    return status_data['text']
+                    transcript_text = status_data.get('text', '')
+                    print(f"✅ TRANSCRIBE: Transcription completed! Length: {len(transcript_text)} chars")
+                    return transcript_text
                 elif status_data['status'] == 'error':
+                    error_msg = status_data.get('error', 'Unknown transcription error')
+                    print(f"❌ TRANSCRIBE: Transcription failed with error: {error_msg}")
                     return None
+            else:
+                print(f"❌ TRANSCRIBE: Status check failed: {status_response.status_code}")
             
             time.sleep(5)
         
+        print(f"⏰ TRANSCRIBE: Transcription timed out after 10 minutes")
         return None
         
     except Exception as e:
-        print(f"Transcription error: {e}")
+        print(f"❌ TRANSCRIBE: Exception during transcription: {e}")
+        import traceback
+        print(f"❌ TRANSCRIBE: Traceback: {traceback.format_exc()}")
         return None
 
 def generate_ai_summary(transcript: str, duration_minutes: int, stream_url: str) -> str:
@@ -668,3 +700,629 @@ def ask_proxy(event, context):
     except Exception as e:
         print(f"Ask proxy error: {e}")
         return lambda_response(500, {'error': 'Internal server error'})
+
+def twitch_credentials(event, context):
+    """
+    Securely provide Twitch API credentials to authenticated users
+    """
+    try:
+        # Authenticate user
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            return error_response
+            
+        # Return Twitch credentials from environment
+        return lambda_response(200, {
+            'client_id': TWITCH_CLIENT_ID,
+            'client_secret': TWITCH_CLIENT_SECRET
+        })
+        
+    except Exception as e:
+        print(f"❌ TWITCH_CREDS: Error: {e}")
+        return lambda_response(500, {'error': f'Internal server error: {str(e)}'})
+
+def init_chunked_upload(event, context):
+    """
+    Initialize chunked audio upload session
+    """
+    try:
+        # Authenticate user  
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            return error_response
+            
+        body = json.loads(event['body'])
+        total_size = body.get('total_size')
+        total_chunks = body.get('total_chunks')
+        format_type = body.get('format', 'pcm16')
+        sample_rate = body.get('sample_rate', 16000)
+        metadata = body.get('metadata', {})
+        
+        # Generate unique upload ID
+        upload_id = f"{user_data['user_id']}_{int(time.time())}_{total_chunks}chunks"
+        
+        # Store upload session info (in production, use DynamoDB)
+        upload_session = {
+            'upload_id': upload_id,
+            'user_id': user_data['user_id'],
+            'total_size': total_size,
+            'total_chunks': total_chunks,
+            'format': format_type,
+            'sample_rate': sample_rate,
+            'metadata': metadata,
+            'created_at': int(time.time()),
+            'chunks_received': 0,
+            'chunks_data': {}  # Store chunks temporarily
+        }
+        
+        # In production, save to DynamoDB
+        # For now, store in Lambda /tmp (not persistent across invocations)
+        session_file = f"/tmp/upload_{upload_id}.json"
+        with open(session_file, 'w') as f:
+            json.dump(upload_session, f)
+            
+        print(f"✅ CHUNKED_INIT: Upload session created: {upload_id}")
+        
+        return lambda_response(200, {
+            'upload_id': upload_id,
+            'total_chunks': total_chunks,
+            'chunk_size_limit': 4 * 1024 * 1024  # 4MB
+        })
+        
+    except Exception as e:
+        print(f"❌ CHUNKED_INIT: Error: {e}")
+        return lambda_response(500, {'error': f'Init failed: {str(e)}'})
+
+def upload_chunk(event, context):
+    """
+    Upload individual audio chunk
+    """
+    try:
+        # Authenticate user
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            return error_response
+            
+        body = json.loads(event['body'])
+        upload_id = body.get('upload_id')
+        chunk_index = body.get('chunk_index')
+        chunk_data_b64 = body.get('chunk_data')
+        chunk_size = body.get('chunk_size')
+        
+        if not all([upload_id, chunk_index is not None, chunk_data_b64]):
+            return lambda_response(400, {'error': 'Missing required chunk data'})
+            
+        # Load upload session
+        session_file = f"/tmp/upload_{upload_id}.json"
+        if not os.path.exists(session_file):
+            return lambda_response(404, {'error': 'Upload session not found'})
+            
+        with open(session_file, 'r') as f:
+            upload_session = json.load(f)
+            
+        # Verify user owns this session
+        if upload_session['user_id'] != user_data['user_id']:
+            return lambda_response(403, {'error': 'Unauthorized access to upload session'})
+            
+        # Decode base64 chunk data
+        chunk_data = base64.b64decode(chunk_data_b64)
+        
+        # Store chunk data temporarily
+        chunk_file = f"/tmp/chunk_{upload_id}_{chunk_index}.dat"
+        with open(chunk_file, 'wb') as f:
+            f.write(chunk_data)
+            
+        # Update session
+        upload_session['chunks_received'] += 1
+        upload_session['chunks_data'][str(chunk_index)] = {
+            'file': chunk_file,
+            'size': len(chunk_data),
+            'received_at': int(time.time())
+        }
+        
+        # Save updated session
+        with open(session_file, 'w') as f:
+            json.dump(upload_session, f)
+            
+        print(f"✅ CHUNKED_UPLOAD: Chunk {chunk_index} received ({len(chunk_data)} bytes)")
+        
+        return lambda_response(200, {
+            'chunk_index': chunk_index,
+            'etag': f'chunk_{chunk_index}_{len(chunk_data)}',
+            'chunks_received': upload_session['chunks_received'],
+            'total_chunks': upload_session['total_chunks']
+        })
+        
+    except Exception as e:
+        print(f"❌ CHUNKED_UPLOAD: Error: {e}")
+        return lambda_response(500, {'error': f'Chunk upload failed: {str(e)}'})
+
+def finalize_chunked_upload(event, context):
+    """
+    Finalize chunked upload and process complete audio
+    """
+    try:
+        # Authenticate user
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            return error_response
+            
+        body = json.loads(event['body'])
+        upload_id = body.get('upload_id')
+        chunk_results = body.get('chunk_results', [])
+        
+        if not upload_id:
+            return lambda_response(400, {'error': 'Missing upload_id'})
+            
+        # Load upload session
+        session_file = f"/tmp/upload_{upload_id}.json"
+        if not os.path.exists(session_file):
+            return lambda_response(404, {'error': 'Upload session not found'})
+            
+        with open(session_file, 'r') as f:
+            upload_session = json.load(f)
+            
+        # Verify user owns this session
+        if upload_session['user_id'] != user_data['user_id']:
+            return lambda_response(403, {'error': 'Unauthorized access to upload session'})
+            
+        # Verify all chunks received
+        if upload_session['chunks_received'] != upload_session['total_chunks']:
+            return lambda_response(400, {
+                'error': f"Missing chunks: {upload_session['chunks_received']}/{upload_session['total_chunks']}"
+            })
+            
+        print(f"🔗 CHUNKED_FINALIZE: Reconstructing audio from {upload_session['chunks_received']} chunks")
+        
+        # Reconstruct complete audio file
+        complete_audio_file = f"/tmp/complete_{upload_id}.wav"
+        with open(complete_audio_file, 'wb') as outfile:
+            for chunk_index in sorted(upload_session['chunks_data'].keys(), key=int):
+                chunk_info = upload_session['chunks_data'][chunk_index]
+                chunk_file = chunk_info['file']
+                
+                if os.path.exists(chunk_file):
+                    with open(chunk_file, 'rb') as infile:
+                        outfile.write(infile.read())
+                    # Clean up chunk file
+                    os.remove(chunk_file)
+                else:
+                    print(f"⚠️ CHUNKED_FINALIZE: Missing chunk file {chunk_index}")
+                    
+        print(f"✅ CHUNKED_FINALIZE: Audio file reconstructed: {complete_audio_file}")
+        
+        # Process the complete audio file
+        result = process_complete_audio(complete_audio_file, upload_session)
+        
+        # Cleanup
+        if os.path.exists(complete_audio_file):
+            os.remove(complete_audio_file)
+        if os.path.exists(session_file):
+            os.remove(session_file)
+            
+        print(f"✅ CHUNKED_FINALIZE: Processing completed")
+        
+        return lambda_response(200, {
+            'success': True,
+            'data': result,
+            'upload_id': upload_id,
+            'chunks_processed': upload_session['chunks_received']
+        })
+        
+    except Exception as e:
+        print(f"❌ CHUNKED_FINALIZE: Error: {e}")
+        import traceback
+        print(f"❌ CHUNKED_FINALIZE: Traceback: {traceback.format_exc()}")
+        return lambda_response(500, {'error': f'Finalization failed: {str(e)}'})
+
+def process_audio(event, context):
+    """
+    Process single-chunk audio upload
+    """
+    try:
+        # Authenticate user
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            return error_response
+            
+        body = json.loads(event['body'])
+        audio_data_b64 = body.get('audio_data')
+        format_type = body.get('format', 'pcm16')
+        sample_rate = body.get('sample_rate', 16000)
+        is_single_chunk = body.get('is_single_chunk', True)
+        metadata = body.get('metadata', {})
+        
+        if not audio_data_b64:
+            return lambda_response(400, {'error': 'Missing audio_data'})
+            
+        # Decode base64 audio data
+        audio_data = base64.b64decode(audio_data_b64)
+        
+        print(f"🎵 PROCESS_AUDIO: Processing {len(audio_data)} bytes of audio")
+        
+        # Save audio to temporary file
+        audio_file = f"/tmp/audio_{user_data['user_id']}_{int(time.time())}.wav"
+        with open(audio_file, 'wb') as f:
+            f.write(audio_data)
+            
+        # Create session-like object for processing
+        session = {
+            'user_id': user_data['user_id'],
+            'format': format_type,
+            'sample_rate': sample_rate,
+            'metadata': metadata
+        }
+        
+        # Process the audio
+        result = process_complete_audio(audio_file, session)
+        
+        # Cleanup
+        if os.path.exists(audio_file):
+            os.remove(audio_file)
+            
+        print(f"✅ PROCESS_AUDIO: Single audio processing completed")
+        
+        return lambda_response(200, {
+            'success': True,
+            'data': result
+        })
+        
+    except Exception as e:
+        print(f"❌ PROCESS_AUDIO: Error: {e}")
+        return lambda_response(500, {'error': f'Audio processing failed: {str(e)}'})
+
+def process_complete_audio(audio_file_path: str, session: dict) -> dict:
+    """
+    Process complete audio file: transcribe and summarize
+    """
+    try:
+        print(f"🔄 PROCESS_COMPLETE: Processing audio file: {audio_file_path}")
+        
+        # Get file size
+        file_size = os.path.getsize(audio_file_path)
+        print(f"📊 PROCESS_COMPLETE: Audio file size: {file_size} bytes")
+        
+        # Transcribe with AssemblyAI
+        print(f"🔄 PROCESS_COMPLETE: Starting transcription...")
+        transcript = transcribe_audio_file(audio_file_path)
+        
+        if not transcript:
+            return {
+                'error': 'Transcription failed',
+                'success': False
+            }
+            
+        print(f"✅ PROCESS_COMPLETE: Transcription completed ({len(transcript)} chars)")
+        
+        # Generate AI summary
+        metadata = session.get('metadata', {})
+        stream_url = metadata.get('stream_url', 'Unknown source')
+        duration_minutes = metadata.get('duration_minutes', 30)
+        
+        print(f"🔄 PROCESS_COMPLETE: Generating AI summary...")
+        summary = generate_ai_summary(transcript, duration_minutes, stream_url)
+        
+        print(f"✅ PROCESS_COMPLETE: AI summary generated")
+        
+        return {
+            'success': True,
+            'transcript': transcript,
+            'summary': summary,
+            'metadata': {
+                'audio_size_bytes': file_size,
+                'transcript_length': len(transcript),
+                'processing_method': 'chunked_browser_upload',
+                'stream_url': stream_url,
+                'duration_minutes': duration_minutes
+            }
+        }
+        
+    except Exception as e:
+        print(f"❌ PROCESS_COMPLETE: Error: {e}")
+        return {
+            'error': str(e),
+            'success': False
+        }
+
+def get_presigned_upload_url(event, context):
+    """
+    Generate presigned S3 URL for large audio file uploads
+    This bypasses API Gateway's 10MB limit for file transfers
+    """
+    try:
+        print(f"🔄 PRESIGNED_URL: Starting presigned URL generation...")
+        
+        # Authenticate user
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            print(f"❌ PRESIGNED_URL: Authentication failed")
+            return error_response
+        
+        # Convert Decimal objects
+        user_data = convert_decimals(user_data)
+        
+        # Parse request
+        body = json.loads(event['body'])
+        file_size = body.get('file_size')
+        content_type = body.get('content_type', 'audio/pcm')
+        metadata = body.get('metadata', {})
+        
+        if not file_size or file_size <= 0:
+            print(f"❌ PRESIGNED_URL: Invalid file_size: {file_size}")
+            return lambda_response(400, {'error': 'Valid file_size is required'})
+        
+        # Validate file size (max 500MB)
+        max_file_size = 500 * 1024 * 1024  # 500MB
+        if file_size > max_file_size:
+            print(f"❌ PRESIGNED_URL: File too large: {file_size} bytes")
+            return lambda_response(400, {
+                'error': f'File too large. Maximum size is {max_file_size // (1024*1024)}MB, got {file_size // (1024*1024)}MB'
+            })
+        
+        # Check user credits for processing (skip for admin users)
+        if not user_data.get('is_admin', False):
+            duration_minutes = metadata.get('duration_minutes', 30)
+            credits_needed = CREDIT_COSTS.get(f'catchup_{duration_minutes}min', 300)
+            has_credits, balance = check_credits(user_data['user_id'], credits_needed)
+            
+            if not has_credits:
+                print(f"❌ PRESIGNED_URL: Insufficient credits - needed: {credits_needed}, has: {balance}")
+                return lambda_response(402, {
+                    'error': 'Insufficient credits',
+                    'required': credits_needed,
+                    'balance': float(balance) if balance else 0
+                })
+        
+        # Generate unique processing ID and S3 key
+        processing_id = str(uuid.uuid4())
+        s3_key = f"temp/{user_data['user_id']}/{processing_id}.pcm"
+        
+        print(f"✅ PRESIGNED_URL: Generated processing ID: {processing_id}")
+        print(f"✅ PRESIGNED_URL: S3 key: {s3_key}")
+        
+        # Generate presigned URL for PUT operation (direct upload)
+        try:
+            presigned_url = s3_client.generate_presigned_url(
+                'put_object',
+                Params={
+                    'Bucket': S3_BUCKET_AUDIO,
+                    'Key': s3_key,
+                    'ContentType': content_type,
+                    'Metadata': {
+                        'user_id': user_data['user_id'],
+                        'processing_id': processing_id,
+                        'file_size': str(file_size),
+                        'upload_timestamp': str(int(time.time())),
+                        'stream_url': metadata.get('stream_url', ''),
+                        'duration_minutes': str(metadata.get('duration_minutes', 30))
+                    }
+                },
+                ExpiresIn=3600  # URL expires in 1 hour
+            )
+            print(f"✅ PRESIGNED_URL: Generated presigned URL successfully")
+            
+        except Exception as e:
+            print(f"❌ PRESIGNED_URL: Failed to generate presigned URL: {e}")
+            return lambda_response(500, {'error': f'Failed to generate presigned URL: {str(e)}'})
+        
+        print(f"✅ PRESIGNED_URL: Returning response to client")
+        
+        return lambda_response(200, {
+            'success': True,
+            'upload_url': presigned_url,
+            's3_key': s3_key,
+            'processing_id': processing_id,
+            'expires_in': 3600,
+            'max_file_size': max_file_size,
+            'instructions': 'Upload raw PCM audio data directly to the presigned URL using PUT request'
+        })
+        
+    except json.JSONDecodeError:
+        print(f"❌ PRESIGNED_URL: JSON decode error")
+        return lambda_response(400, {'error': 'Invalid JSON in request body'})
+    except Exception as e:
+        print(f"❌ PRESIGNED_URL: Unexpected error: {e}")
+        import traceback
+        print(f"❌ PRESIGNED_URL: Traceback: {traceback.format_exc()}")
+        return lambda_response(500, {'error': f'Internal server error: {str(e)}'})
+
+def process_s3_audio(event, context):
+    """
+    Process audio file uploaded to S3 via presigned URL
+    Downloads from S3, transcribes with AssemblyAI, and generates AI summary
+    """
+    try:
+        print(f"🔄 S3_PROCESS: Starting S3 audio processing...")
+        
+        # Authenticate user
+        user_data, error_response = authenticate_request(event)
+        if error_response:
+            print(f"❌ S3_PROCESS: Authentication failed")
+            return error_response
+        
+        # Convert Decimal objects
+        user_data = convert_decimals(user_data)
+        
+        # Parse request
+        body = json.loads(event['body'])
+        processing_id = body.get('processing_id')
+        s3_key = body.get('s3_key')
+        metadata = body.get('metadata', {})
+        
+        if not processing_id or not s3_key:
+            print(f"❌ S3_PROCESS: Missing required fields")
+            return lambda_response(400, {'error': 'processing_id and s3_key are required'})
+        
+        # Verify the S3 key belongs to this user
+        expected_prefix = f"temp/{user_data['user_id']}/"
+        if not s3_key.startswith(expected_prefix):
+            print(f"❌ S3_PROCESS: Invalid S3 key for user")
+            return lambda_response(403, {'error': 'Access denied to S3 object'})
+        
+        print(f"✅ S3_PROCESS: Processing request for processing_id: {processing_id}")
+        
+        # Check if S3 object exists and get metadata
+        try:
+            response = s3_client.head_object(Bucket=S3_BUCKET_AUDIO, Key=s3_key)
+            object_metadata = response.get('Metadata', {})
+            file_size = int(response.get('ContentLength', 0))
+            
+            print(f"✅ S3_PROCESS: S3 object found - size: {file_size} bytes")
+            print(f"📊 S3_PROCESS: Object metadata: {object_metadata}")
+            
+        except s3_client.exceptions.NoSuchKey:
+            print(f"❌ S3_PROCESS: S3 object not found: {s3_key}")
+            return lambda_response(404, {'error': 'Audio file not found in S3. Please upload first.'})
+        except Exception as e:
+            print(f"❌ S3_PROCESS: S3 head_object failed: {e}")
+            return lambda_response(500, {'error': f'Failed to access S3 object: {str(e)}'})
+        
+        # Download the audio file from S3 to temporary location
+        temp_audio_file = f"/tmp/s3_audio_{processing_id}.pcm"
+        
+        print(f"🔄 S3_PROCESS: Downloading audio from S3...")
+        try:
+            s3_client.download_file(S3_BUCKET_AUDIO, s3_key, temp_audio_file)
+            downloaded_size = os.path.getsize(temp_audio_file)
+            print(f"✅ S3_PROCESS: Audio downloaded successfully - size: {downloaded_size} bytes")
+        except Exception as e:
+            print(f"❌ S3_PROCESS: S3 download failed: {e}")
+            return lambda_response(500, {'error': f'Failed to download audio from S3: {str(e)}'})
+        
+        # Verify file integrity
+        if downloaded_size != file_size:
+            print(f"❌ S3_PROCESS: File size mismatch - expected: {file_size}, got: {downloaded_size}")
+            return lambda_response(500, {'error': 'Downloaded file size mismatch'})
+        
+        # Convert PCM to WAV format for AssemblyAI
+        print(f"🔄 S3_PROCESS: Converting PCM to WAV format...")
+        wav_audio_file = f"/tmp/s3_audio_{processing_id}.wav"
+        
+        try:
+            # Convert raw PCM to WAV using simple header
+            sample_rate = 16000
+            num_channels = 1
+            bits_per_sample = 16
+            
+            with open(temp_audio_file, 'rb') as pcm_file:
+                pcm_data = pcm_file.read()
+            
+            # Create WAV header
+            wav_header = create_wav_header(len(pcm_data), sample_rate, num_channels, bits_per_sample)
+            
+            with open(wav_audio_file, 'wb') as wav_file:
+                wav_file.write(wav_header)
+                wav_file.write(pcm_data)
+            
+            print(f"✅ S3_PROCESS: PCM converted to WAV successfully")
+            
+        except Exception as e:
+            print(f"❌ S3_PROCESS: PCM to WAV conversion failed: {e}")
+            return lambda_response(500, {'error': f'Audio format conversion failed: {str(e)}'})
+        
+        # Create session-like object for processing
+        session = {
+            'user_id': user_data['user_id'],
+            'format': 'pcm16',
+            'sample_rate': sample_rate,
+            'metadata': {
+                **metadata,
+                's3_key': s3_key,
+                'processing_id': processing_id,
+                'file_size_bytes': file_size,
+                'processing_method': 'presigned_s3_upload'
+            }
+        }
+        
+        # Process the complete audio file (transcribe + summarize)
+        print(f"🔄 S3_PROCESS: Starting transcription and summarization...")
+        result = process_complete_audio(wav_audio_file, session)
+        
+        if result.get('success'):
+            print(f"✅ S3_PROCESS: Processing completed successfully")
+            
+            # Deduct credits for successful processing (skip for admin users)
+            if not user_data.get('is_admin', False):
+                duration_minutes = metadata.get('duration_minutes', 30)
+                credits_needed = CREDIT_COSTS.get(f'catchup_{duration_minutes}min', 300)
+                
+                try:
+                    deduct_result = deduct_credits(
+                        user_data['user_id'],
+                        credits_needed,
+                        f'catchup_{duration_minutes}min_s3',
+                        {
+                            **metadata,
+                            'processing_id': processing_id,
+                            's3_key': s3_key,
+                            'file_size_bytes': file_size,
+                            'transcript_length': len(result.get('transcript', ''))
+                        }
+                    )
+                    print(f"✅ S3_PROCESS: Credits deducted: {deduct_result}")
+                except Exception as e:
+                    print(f"⚠️ S3_PROCESS: Credit deduction failed: {e}")
+        
+        # Clean up temporary files
+        for temp_file in [temp_audio_file, wav_audio_file]:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    print(f"✅ S3_PROCESS: Cleaned up: {temp_file}")
+            except Exception as e:
+                print(f"⚠️ S3_PROCESS: Cleanup failed for {temp_file}: {e}")
+        
+        # Clean up S3 file
+        try:
+            s3_client.delete_object(Bucket=S3_BUCKET_AUDIO, Key=s3_key)
+            print(f"✅ S3_PROCESS: S3 object deleted: {s3_key}")
+        except Exception as e:
+            print(f"⚠️ S3_PROCESS: S3 cleanup failed: {e}")
+        
+        print(f"✅ S3_PROCESS: All processing completed successfully")
+        
+        return lambda_response(200, {
+            'success': True,
+            'data': result,
+            'processing_id': processing_id,
+            'processing_method': 'presigned_s3_upload'
+        })
+        
+    except json.JSONDecodeError:
+        print(f"❌ S3_PROCESS: JSON decode error")
+        return lambda_response(400, {'error': 'Invalid JSON in request body'})
+    except Exception as e:
+        print(f"❌ S3_PROCESS: Unexpected error: {e}")
+        import traceback
+        print(f"❌ S3_PROCESS: Traceback: {traceback.format_exc()}")
+        return lambda_response(500, {'error': f'Internal server error: {str(e)}'})
+
+def create_wav_header(data_size, sample_rate, num_channels, bits_per_sample):
+    """
+    Create WAV file header for raw PCM data
+    """
+    byte_rate = sample_rate * num_channels * bits_per_sample // 8
+    block_align = num_channels * bits_per_sample // 8
+    
+    header = bytearray(44)
+    
+    # RIFF chunk descriptor
+    header[0:4] = b'RIFF'
+    header[4:8] = (36 + data_size).to_bytes(4, 'little')  # ChunkSize
+    header[8:12] = b'WAVE'
+    
+    # fmt sub-chunk
+    header[12:16] = b'fmt '
+    header[16:20] = (16).to_bytes(4, 'little')  # Subchunk1Size (PCM = 16)
+    header[20:22] = (1).to_bytes(2, 'little')   # AudioFormat (PCM = 1)
+    header[22:24] = num_channels.to_bytes(2, 'little')
+    header[24:28] = sample_rate.to_bytes(4, 'little')
+    header[28:32] = byte_rate.to_bytes(4, 'little')
+    header[32:34] = block_align.to_bytes(2, 'little')
+    header[34:36] = bits_per_sample.to_bytes(2, 'little')
+    
+    # data sub-chunk
+    header[36:40] = b'data'
+    header[40:44] = data_size.to_bytes(4, 'little')
+    
+    return bytes(header)

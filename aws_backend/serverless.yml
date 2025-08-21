@@ -13,6 +13,7 @@ provider:
     DYNAMODB_TABLE_USERS: ${self:service}-users-${self:provider.stage}
     DYNAMODB_TABLE_USAGE: ${self:service}-usage-${self:provider.stage}
     DYNAMODB_TABLE_TRANSACTIONS: ${self:service}-transactions-${self:provider.stage}
+    S3_BUCKET_AUDIO: ${self:service}-audio-uploads-${self:provider.stage}
     
     # Secure API Keys (use serverless-dotenv-plugin or AWS Systems Manager)
     ASSEMBLYAI_API_KEY: ${env:ASSEMBLYAI_API_KEY}
@@ -41,6 +42,19 @@ provider:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USAGE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_TRANSACTIONS}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USERS}/index/*"
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+            - s3:PutObjectAcl
+          Resource: 
+            - "arn:aws:s3:::${self:provider.environment.S3_BUCKET_AUDIO}/*"
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+          Resource: 
+            - "arn:aws:s3:::${self:provider.environment.S3_BUCKET_AUDIO}"
 
 functions:
   # Authentication Functions
@@ -118,6 +132,107 @@ functions:
     events:
       - http:
           path: transcription/ask
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Twitch API Functions
+  twitchCredentials:
+    handler: src/transcription.twitch_credentials
+    timeout: 10
+    events:
+      - http:
+          path: twitch/credentials
+          method: get
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Chunked Audio Upload Functions  
+  initChunkedUpload:
+    handler: src/transcription.init_chunked_upload
+    timeout: 30
+    events:
+      - http:
+          path: transcription/init-chunked-upload
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  uploadChunk:
+    handler: src/transcription.upload_chunk
+    timeout: 60
+    events:
+      - http:
+          path: transcription/upload-chunk
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  finalizeChunkedUpload:
+    handler: src/transcription.finalize_chunked_upload
+    timeout: 300  # 5 minutes for processing
+    events:
+      - http:
+          path: transcription/finalize-chunked-upload
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  processAudio:
+    handler: src/transcription.process_audio
+    timeout: 300  # 5 minutes for processing
+    events:
+      - http:
+          path: transcription/process-audio
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  # Presigned S3 URL Functions for Large File Support
+  getPresignedUploadUrl:
+    handler: src/transcription.get_presigned_upload_url
+    timeout: 30
+    events:
+      - http:
+          path: transcription/get-presigned-upload-url
+          method: post
+          cors:
+            origin: "chrome-extension://*"
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
+
+  processS3Audio:
+    handler: src/transcription.process_s3_audio
+    timeout: 300  # 5 minutes for processing
+    events:
+      - http:
+          path: transcription/process-s3-audio
           method: post
           cors:
             origin: "chrome-extension://*"
@@ -245,7 +360,35 @@ resources:
             Projection:
               ProjectionType: ALL
 
+    # S3 Bucket for Audio Uploads
+    AudioUploadsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.S3_BUCKET_AUDIO}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders: ["*"]
+              AllowedMethods: [PUT]
+              AllowedOrigins: ["*"]
+              MaxAge: 3600
+        LifecycleConfiguration:
+          Rules:
+            - Id: DeleteIncompleteMultipartUploads
+              Status: Enabled
+              AbortIncompleteMultipartUpload:
+                DaysAfterInitiation: 1
+            - Id: DeleteTemporaryFiles
+              Status: Enabled
+              ExpirationInDays: 1
+              Prefix: temp/
+
 plugins:
+  - serverless-dotenv-plugin
   - serverless-python-requirements
 
 custom:
