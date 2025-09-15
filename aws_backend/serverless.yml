@@ -13,6 +13,7 @@ provider:
     DYNAMODB_TABLE_USERS: ${self:service}-users-${self:provider.stage}
     DYNAMODB_TABLE_USAGE: ${self:service}-usage-${self:provider.stage}
     DYNAMODB_TABLE_TRANSACTIONS: ${self:service}-transactions-${self:provider.stage}
+    DYNAMODB_TABLE_SESSIONS: ${self:service}-sessions-${self:provider.stage}
     S3_BUCKET_AUDIO: ${self:service}-audio-uploads-${self:provider.stage}
     
     # Secure API Keys (use serverless-dotenv-plugin or AWS Systems Manager)
@@ -41,6 +42,7 @@ provider:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USERS}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USAGE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_TRANSACTIONS}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_SESSIONS}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_USERS}/index/*"
         - Effect: Allow
           Action:
@@ -354,6 +356,27 @@ resources:
             KeyType: HASH
         GlobalSecondaryIndexes:
           - IndexName: UserIndex
+            KeySchema:
+              - AttributeName: user_id
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    SessionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_SESSIONS}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: session_id
+            AttributeType: S
+          - AttributeName: user_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: session_id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: UserSessionsIndex
             KeySchema:
               - AttributeName: user_id
                 KeyType: HASH

@@ -34,10 +34,22 @@ def stream_proxy(event, context):
     Returns API key and starts credit tracking session
     """
     try:
-        # Authenticate user
-        user_data, error_response = authenticate_request(event)
-        if error_response:
-            return error_response
+        # Check for temporary admin bypass token (Chrome Web Store deployment)
+        headers = event.get('headers', {})
+        auth_header = headers.get('authorization', '') or headers.get('Authorization', '')
+        if auth_header == 'Bearer admin-bypass-token':
+            print('🔑 ADMIN BYPASS: Using temporary admin session for Chrome Web Store')
+            user_data = {
+                'user_id': 'admin',
+                'email': 'aryanwadhwa234@gmail.com',
+                'credits_balance': 999999,
+                'is_admin': True
+            }
+        else:
+            # Normal authentication
+            user_data, error_response = authenticate_request(event)
+            if error_response:
+                return error_response
         
         # Convert Decimal objects
         user_data = convert_decimals(user_data)
@@ -51,18 +63,103 @@ def stream_proxy(event, context):
             if not user_data.get('is_admin', False) and user_data.get('credits_balance', 0) < 10:
                 return lambda_response(402, {'error': 'Insufficient credits. Minimum 10 credits required to start transcription.'})
             
+            # Create session record for tracking usage
+            session_id = str(uuid.uuid4())
+            try:
+                # Store session start time in DynamoDB for credit calculation
+                import boto3
+                dynamodb = boto3.resource('dynamodb')
+                sessions_table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE_SESSIONS', 'live-transcription-sessions'))
+                
+                sessions_table.put_item(Item={
+                    'session_id': session_id,
+                    'user_id': user_data['user_id'],
+                    'start_time': int(datetime.utcnow().timestamp()),
+                    'status': 'active'
+                })
+                print(f"✅ STREAM: Session started: {session_id}")
+            except Exception as e:
+                print(f"⚠️ STREAM: Session tracking failed: {e}")
+                # Continue anyway - don't block transcription
+            
             # Return API key for direct connection
             return lambda_response(200, {
                 'success': True,
                 'assemblyai_api_key': ASSEMBLYAI_API_KEY,
-                'session_id': str(uuid.uuid4()),
+                'session_id': session_id,
                 'credits_balance': user_data.get('credits_balance', 0)
             })
             
         elif action == 'stop':
-            # TODO: Calculate actual usage and deduct credits
-            # For now, deduct 10 credits per session
-            return lambda_response(200, {'success': True, 'message': 'Session ended'})
+            # Calculate actual usage and deduct credits
+            session_id = body.get('session_id')
+            if not session_id:
+                return lambda_response(400, {'error': 'Session ID required for stop action'})
+            
+            try:
+                # Get session data and calculate duration
+                import boto3
+                dynamodb = boto3.resource('dynamodb')
+                sessions_table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE_SESSIONS', 'live-transcription-sessions'))
+                
+                response = sessions_table.get_item(Key={'session_id': session_id})
+                if 'Item' not in response:
+                    print(f"⚠️ STREAM: Session not found: {session_id}")
+                    return lambda_response(200, {'success': True, 'message': 'Session ended (not tracked)'})
+                
+                session_data = response['Item']
+                start_time = session_data['start_time']
+                end_time = int(datetime.utcnow().timestamp())
+                duration_seconds = end_time - start_time
+                duration_minutes = max(1, round(duration_seconds / 60))  # Minimum 1 minute billing
+                
+                credits_needed = duration_minutes * 10  # 10 credits per minute
+                
+                print(f"📊 STREAM: Session duration: {duration_minutes} minutes, Credits needed: {credits_needed}")
+                
+                # Skip credit deduction for admin users
+                if user_data.get('is_admin', False):
+                    print(f"🔑 STREAM: Admin user - skipping credit deduction")
+                    new_balance = user_data.get('credits_balance', 999999)
+                else:
+                    # Deduct credits
+                    from .credits import deduct_credits
+                    deduct_result = deduct_credits(
+                        user_data['user_id'],
+                        credits_needed,
+                        'live_transcription',
+                        {
+                            'session_id': session_id,
+                            'duration_minutes': duration_minutes,
+                            'duration_seconds': duration_seconds
+                        }
+                    )
+                    print(f"✅ STREAM: Credits deducted successfully: {deduct_result}")
+                    new_balance = user_data.get('credits_balance', 0) - credits_needed
+                
+                # Update session status
+                sessions_table.update_item(
+                    Key={'session_id': session_id},
+                    UpdateExpression='SET #status = :status, end_time = :end_time, duration_minutes = :duration',
+                    ExpressionAttributeNames={'#status': 'status'},
+                    ExpressionAttributeValues={
+                        ':status': 'completed',
+                        ':end_time': end_time,
+                        ':duration': duration_minutes
+                    }
+                )
+                
+                return lambda_response(200, {
+                    'success': True,
+                    'message': 'Session ended',
+                    'duration_minutes': duration_minutes,
+                    'credits_used': credits_needed,
+                    'remaining_balance': new_balance
+                })
+                
+            except Exception as e:
+                print(f"❌ STREAM: Stop session error: {e}")
+                return lambda_response(200, {'success': True, 'message': 'Session ended (credit calculation failed)'})
             
         else:
             return lambda_response(400, {'error': 'Invalid action'})
@@ -620,26 +717,56 @@ def ask_proxy(event, context):
     AI Question answering proxy for transcript analysis
     """
     try:
-        # Authenticate user
-        user_data, error_response = authenticate_request(event)
-        if error_response:
-            return error_response
+        print(f"🔍 ASK_PROXY: Full event received: {json.dumps(event, indent=2)}")
+        
+        # Check for temporary admin bypass token (Chrome Web Store deployment)
+        headers = event.get('headers', {})
+        print(f"🔍 ASK_PROXY: Headers: {headers}")
+        
+        auth_header = headers.get('authorization', '') or headers.get('Authorization', '')
+        print(f"🔍 ASK_PROXY: Auth header: '{auth_header}'")
+        
+        if auth_header == 'Bearer admin-bypass-token':
+            print('🔑 ADMIN BYPASS: Using temporary admin session for Ask Agent')
+            user_data = {
+                'user_id': 'admin',
+                'email': 'aryanwadhwa234@gmail.com',
+                'credits_balance': 999999,
+                'is_admin': True
+            }
+        else:
+            print('🔍 ASK_PROXY: No admin bypass, using normal authentication')
+            # Normal authentication
+            user_data, error_response = authenticate_request(event)
+            if error_response:
+                print(f"❌ ASK_PROXY: Authentication failed: {error_response}")
+                return error_response
         
         # Parse request
+        print(f"🔍 ASK_PROXY: Event body: {event.get('body', 'NO BODY')}")
         body = json.loads(event['body'])
+        print(f"🔍 ASK_PROXY: Parsed body: {body}")
+        
         question = body.get('question', '').strip()
         transcript = body.get('transcript', '').strip()
         
+        print(f"🔍 ASK_PROXY: Question: '{question}'")
+        print(f"🔍 ASK_PROXY: Transcript length: {len(transcript)}")
+        
         if not question:
+            print("❌ ASK_PROXY: No question provided")
             return lambda_response(400, {'error': 'Question is required'})
         
         if not transcript:
+            print("❌ ASK_PROXY: No transcript provided")
             return lambda_response(400, {'error': 'No transcript available. Please start transcription first and wait for some content to be transcribed.'})
         
         # Check credits (5 credits per question)
         user_data = convert_decimals(user_data)
         current_balance = user_data.get('credits_balance', 0)
         credits_needed = 5
+        
+        print(f"🔍 ASK_PROXY: Current balance: {current_balance}, Credits needed: {credits_needed}")
         
         if current_balance < credits_needed:
             return lambda_response(402, {
@@ -681,25 +808,46 @@ def ask_proxy(event, context):
             ai_response = response.json()
             answer = ai_response['choices'][0]['message']['content']
             
-            # TODO: Deduct credits here (implement credit deduction)
-            # For now, just return the answer
+            # Deduct credits from user account
+            try:
+                from .credits import deduct_credits
+                deduct_result = deduct_credits(
+                    user_data['user_id'],
+                    credits_needed,
+                    'ask_agent_question',
+                    {
+                        'question': question[:100] + '...' if len(question) > 100 else question,
+                        'transcript_length': len(transcript),
+                        'answer_length': len(answer)
+                    }
+                )
+                print(f"✅ ASK_PROXY: Credits deducted successfully: {deduct_result}")
+                new_balance = current_balance - credits_needed
+            except Exception as e:
+                print(f"⚠️ ASK_PROXY: Credit deduction failed: {e}")
+                # Still return the answer even if credit deduction fails
+                new_balance = current_balance
             
             return lambda_response(200, {
                 'success': True,
                 'answer': answer,
                 'credits_used': credits_needed,
-                'remaining_balance': current_balance - credits_needed
+                'remaining_balance': new_balance
             })
             
         except requests.RequestException as e:
             print(f"OpenAI request error: {e}")
             return lambda_response(500, {'error': 'Failed to process AI request'})
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"💥 ASK_PROXY: JSON decode error: {e}")
         return lambda_response(400, {'error': 'Invalid JSON in request body'})
     except Exception as e:
-        print(f"Ask proxy error: {e}")
-        return lambda_response(500, {'error': 'Internal server error'})
+        print(f"💥 ASK_PROXY: CRITICAL ERROR: {str(e)}")
+        print(f"💥 ASK_PROXY: Error type: {type(e)}")
+        import traceback
+        print(f"💥 ASK_PROXY: Traceback: {traceback.format_exc()}")
+        return lambda_response(500, {'error': str(e), 'error_type': str(type(e))})
 
 def twitch_credentials(event, context):
     """

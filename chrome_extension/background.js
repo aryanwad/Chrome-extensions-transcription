@@ -29,6 +29,12 @@ class TranscriptionService {
     try {
       const result = await chrome.storage.local.get(['userAuth']);
       this.userAuth = result.userAuth || null;
+      
+      // Authentication required - user must login
+      if (!this.userAuth) {
+        console.log('🔑 No authentication found - user needs to login');
+      }
+      
       // Remove debug logging
     } catch (error) {
       // Remove debug logging
@@ -211,6 +217,7 @@ class TranscriptionService {
       }
       
       this.sessionId = response.session_id;
+      this.transcriptionStartTime = Date.now();
       
       // Now connect directly to AssemblyAI with the secure API key
       const params = new URLSearchParams({
@@ -338,12 +345,18 @@ class TranscriptionService {
     
     this.isTranscribing = false;
     
-    // Stop backend streaming
-    if (this.isUserLoggedIn()) {
+    // Stop backend streaming and calculate credits
+    if (this.isUserLoggedIn() && this.sessionId) {
       this.apiCall('/transcription/stream', 'POST', {
-        action: 'stop'
+        action: 'stop',
+        session_id: this.sessionId
+      }).then(response => {
+        if (response.success) {
+          console.log(`✅ TRANSCRIPTION: Session ended - Used ${response.credits_used} credits, Duration: ${response.duration_minutes} minutes`);
+          // Could update UI with credit usage info here
+        }
       }).catch(error => {
-        // Remove debug logging
+        console.error('❌ TRANSCRIPTION: Stop session error:', error);
       });
     }
     
@@ -359,6 +372,8 @@ class TranscriptionService {
     // Clean up other resources
     this.transcript = '';
     this.currentTranscriptionTabId = null;
+    this.sessionId = null;
+    this.transcriptionStartTime = null;
     
     // Remove debug logging
   }

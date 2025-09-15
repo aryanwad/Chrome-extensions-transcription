@@ -4,6 +4,7 @@ class PopupController {
     this.backendUrl = 'https://gak2qkt4df.execute-api.us-east-1.amazonaws.com/dev';
     this.currentUser = null;
     this.isTranscribing = false;
+    this.creditsUpdateInterval = null;
     
     this.elements = {
       // Login/Signup sections
@@ -55,6 +56,11 @@ class PopupController {
     this.setupEventListeners();
     await this.checkAuthStatus();
     this.checkTranscriptionStatus();
+    
+    // Cleanup intervals when popup is closed
+    window.addEventListener('beforeunload', () => {
+      this.stopCreditsUpdateInterval();
+    });
   }
   
   setupEventListeners() {
@@ -674,9 +680,36 @@ class PopupController {
     if (isTranscribing) {
       this.elements.startTranscription.classList.add('hidden');
       this.elements.stopTranscription.classList.remove('hidden');
+      
+      // Start live credit balance updates every 30 seconds during transcription
+      this.startCreditsUpdateInterval();
     } else {
       this.elements.startTranscription.classList.remove('hidden');
       this.elements.stopTranscription.classList.add('hidden');
+      
+      // Stop live credit balance updates when transcription ends
+      this.stopCreditsUpdateInterval();
+    }
+  }
+  
+  startCreditsUpdateInterval() {
+    // Clear any existing interval
+    this.stopCreditsUpdateInterval();
+    
+    // Update credits balance every 30 seconds during transcription
+    this.creditsUpdateInterval = setInterval(() => {
+      console.log('💰 Refreshing credit balance during transcription...');
+      this.loadCreditsBalance();
+    }, 30000); // 30 seconds
+    
+    console.log('💰 Started live credit balance updates (every 30 seconds)');
+  }
+  
+  stopCreditsUpdateInterval() {
+    if (this.creditsUpdateInterval) {
+      clearInterval(this.creditsUpdateInterval);
+      this.creditsUpdateInterval = null;
+      console.log('💰 Stopped live credit balance updates');
     }
   }
   
