@@ -10,6 +10,7 @@ class PopupController {
       // Login/Signup sections
       loginSection: document.getElementById('login-section'),
       dashboardSection: document.getElementById('dashboard-section'),
+      creditPackagesSection: document.getElementById('credit-packages-section'),
       
       // Login form
       loginForm: document.getElementById('login-form'),
@@ -34,6 +35,9 @@ class PopupController {
       creditsBalance: document.getElementById('credits-balance'),
       buyCredits: document.getElementById('buy-credits'),
       logoutBtn: document.getElementById('logout-btn'),
+      
+      // Package selection
+      backToDashboard: document.getElementById('back-to-dashboard'),
       
       // Transcription controls
       controlSection: document.getElementById('control-section'),
@@ -87,8 +91,17 @@ class PopupController {
     // Catch-up controls
     this.elements.startCatchup.addEventListener('click', () => this.startCatchup());
     
-    // Credits
-    this.elements.buyCredits.addEventListener('click', () => this.buyCredits());
+    // Credits and package selection
+    this.elements.buyCredits.addEventListener('click', () => this.showCreditPackages());
+    this.elements.backToDashboard.addEventListener('click', () => this.showDashboard());
+    
+    // Package button event listeners (using event delegation)
+    document.addEventListener('click', (e) => {
+      if (e.target.classList.contains('package-btn')) {
+        const packageId = e.target.getAttribute('data-package-id');
+        this.buyCredits(packageId);
+      }
+    });
     
     // Enter key support for login
     this.elements.email.addEventListener('keypress', (e) => {
@@ -255,31 +268,57 @@ class PopupController {
     }
   }
   
-  async buyCredits() {
+  showCreditPackages() {
+    this.elements.dashboardSection.classList.add('hidden');
+    this.elements.creditPackagesSection.classList.remove('hidden');
+  }
+  
+  showDashboard() {
+    this.elements.creditPackagesSection.classList.add('hidden');
+    this.elements.dashboardSection.classList.remove('hidden');
+  }
+  
+  async buyCredits(packageId) {
     try {
       const userAuth = await this.getUserAuth();
       if (!userAuth || !userAuth.token) return;
       
-      this.elements.buyCredits.disabled = true;
-      this.elements.buyCredits.innerHTML = '<span class="loading"></span>Creating checkout...';
+      if (!packageId) {
+        throw new Error('Please select a credit package');
+      }
+      
+      // Disable all package buttons
+      const packageBtns = document.querySelectorAll('.package-btn');
+      packageBtns.forEach(btn => {
+        btn.disabled = true;
+        if (btn.getAttribute('data-package-id') === packageId) {
+          btn.innerHTML = '<span class="loading"></span>Creating checkout...';
+        }
+      });
       
       const response = await this.apiCall('/credits/purchase', 'POST', {
-        package_id: 'starter_pack' // Default package
+        package_id: packageId
       }, userAuth.token);
       
       if (response && response.checkout_url) {
         // Open Stripe checkout in new tab
         chrome.tabs.create({ url: response.checkout_url });
-        this.showTranscriptionStatus('Checkout opened in new tab. Credits will be added after payment.', 'info');
+        this.showDashboard();
+        this.showTranscriptionStatus('Checkout opened in new tab. Credits will be added after payment.', 'success');
       } else {
-        this.showTranscriptionStatus('Failed to create checkout session', 'error');
+        throw new Error(response?.error || 'Failed to create checkout session');
       }
     } catch (error) {
       console.error('Purchase error:', error);
       this.showTranscriptionStatus('Purchase failed: ' + error.message, 'error');
     } finally {
-      this.elements.buyCredits.disabled = false;
-      this.elements.buyCredits.textContent = '💰 Buy More Credits';
+      // Re-enable all package buttons
+      const packageBtns = document.querySelectorAll('.package-btn');
+      packageBtns.forEach(btn => {
+        btn.disabled = false;
+        const packageId = btn.getAttribute('data-package-id');
+        btn.textContent = `Choose ${packageId.charAt(0).toUpperCase() + packageId.slice(1)}`;
+      });
     }
   }
   

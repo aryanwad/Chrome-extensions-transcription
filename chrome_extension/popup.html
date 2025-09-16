@@ -224,6 +224,90 @@
       margin-bottom: 15px;
       font-size: 13px;
     }
+    
+    /* Credit Packages Styling */
+    .packages-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    
+    .package-card {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      padding: 15px;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+    
+    .package-card:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+    
+    .package-card.popular {
+      border-color: #fbbf24;
+      background: rgba(251, 191, 36, 0.1);
+    }
+    
+    .package-badge {
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fbbf24;
+      color: #1a1a1a;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .package-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .package-header h4 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    
+    .package-price {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fbbf24;
+    }
+    
+    .package-credits {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+    
+    .package-time {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-bottom: 8px;
+    }
+    
+    .package-savings {
+      font-size: 12px;
+      color: #10b981;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+    
+    .package-btn {
+      margin-bottom: 0;
+    }
   </style>
 </head>
 <body>
@@ -286,6 +370,47 @@
       
       <button id="buy-credits" class="btn btn-primary">💰 Buy More Credits</button>
       <button id="logout-btn" class="btn btn-secondary">Logout</button>
+    </div>
+    
+    <!-- Credit Packages Section -->
+    <div id="credit-packages-section" class="section hidden">
+      <h3>💳 Choose Credits Package</h3>
+      <div class="packages-grid">
+        <div class="package-card" data-package="starter">
+          <div class="package-header">
+            <h4>Starter Pack</h4>
+            <div class="package-price">$2.99</div>
+          </div>
+          <div class="package-credits">500 Credits</div>
+          <div class="package-time">≈ 50 minutes transcription</div>
+          <button class="btn btn-primary package-btn" data-package-id="starter">Choose Starter</button>
+        </div>
+        
+        <div class="package-card popular" data-package="popular">
+          <div class="package-badge">Most Popular</div>
+          <div class="package-header">
+            <h4>Popular Pack</h4>
+            <div class="package-price">$9.99</div>
+          </div>
+          <div class="package-credits">2000 Credits</div>
+          <div class="package-time">≈ 200 minutes transcription</div>
+          <div class="package-savings">Save 40%</div>
+          <button class="btn btn-primary package-btn" data-package-id="popular">Choose Popular</button>
+        </div>
+        
+        <div class="package-card" data-package="power">
+          <div class="package-header">
+            <h4>Power Pack</h4>
+            <div class="package-price">$19.99</div>
+          </div>
+          <div class="package-credits">5000 Credits</div>
+          <div class="package-time">≈ 500 minutes transcription</div>
+          <div class="package-savings">Save 50%</div>
+          <button class="btn btn-primary package-btn" data-package-id="power">Choose Power</button>
+        </div>
+      </div>
+      
+      <button id="back-to-dashboard" class="btn btn-secondary">← Back</button>
     </div>
     
     <div class="divider"></div>

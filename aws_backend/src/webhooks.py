@@ -18,9 +18,12 @@ def stripe_handler(event, context):
     Handle Stripe webhook events for payment processing
     """
     try:
-        # Get the raw body and signature
+        # Get the raw body and signature (handle case-sensitive headers)
         payload = event['body']
-        sig_header = event['headers'].get('stripe-signature')
+        sig_header = event['headers'].get('stripe-signature') or event['headers'].get('Stripe-Signature')
+        
+        print(f"🔍 WEBHOOK: Headers received: {list(event['headers'].keys())}")
+        print(f"🔍 WEBHOOK: Signature header found: {bool(sig_header)}")
         
         if not sig_header:
             return lambda_response(400, {'error': 'Missing Stripe signature'})
@@ -56,24 +59,28 @@ def handle_successful_payment(session: Dict) -> Dict:
     Add credits to user account
     """
     try:
+        print(f"🎉 WEBHOOK: Processing successful payment for session: {session.get('id')}")
+        print(f"📋 WEBHOOK: Session data: {session}")
+        
         # Extract metadata from the session
         metadata = session.get('metadata', {})
         user_id = metadata.get('user_id')
-        credits = int(metadata.get('credits', 0))
+        credits = int(metadata.get('credits', 0)) if metadata.get('credits') else 0
         package_id = metadata.get('package_id')
         
+        print(f"🔍 WEBHOOK: Extracted metadata - user_id: {user_id}, credits: {credits}, package_id: {package_id}")
+        
         if not user_id or not credits:
-            print(f"Missing required metadata in session: {session['id']}")
+            print(f"❌ WEBHOOK: Missing required metadata in session: {session['id']}")
+            print(f"📋 WEBHOOK: Available metadata: {metadata}")
             return lambda_response(400, {'error': 'Missing metadata'})
         
         # Add credits to user account
+        print(f"💳 WEBHOOK: Adding {credits} credits to user {user_id}")
         success = add_credits(user_id, credits, session['id'])
         
         if success:
-            print(f"Successfully added {credits} credits to user {user_id}")
-            
-            # You could also send confirmation email here
-            # send_purchase_confirmation_email(user_id, credits, package_id)
+            print(f"✅ WEBHOOK: Successfully added {credits} credits to user {user_id}")
             
             return lambda_response(200, {
                 'status': 'success',
@@ -81,11 +88,13 @@ def handle_successful_payment(session: Dict) -> Dict:
                 'user_id': user_id
             })
         else:
-            print(f"Failed to add credits for user {user_id}")
+            print(f"❌ WEBHOOK: Failed to add credits for user {user_id}")
             return lambda_response(500, {'error': 'Failed to process credits'})
         
     except Exception as e:
-        print(f"Payment processing error: {e}")
+        print(f"💥 WEBHOOK: Payment processing error: {e}")
+        import traceback
+        print(f"🔍 WEBHOOK: Full traceback: {traceback.format_exc()}")
         return lambda_response(500, {'error': 'Payment processing failed'})
 
 def handle_expired_payment(session: Dict) -> Dict:

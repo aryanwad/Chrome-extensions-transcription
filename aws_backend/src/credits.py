@@ -91,8 +91,8 @@ def purchase(event, context):
         # Parse request
         body = json.loads(event['body'])
         package_id = body.get('package_id')
-        success_url = body.get('success_url', 'https://your-extension-success-page.com')
-        cancel_url = body.get('cancel_url', 'https://your-extension-cancel-page.com')
+        success_url = body.get('success_url', 'https://www.google.com/?payment=success&msg=Credits+added+successfully')
+        cancel_url = body.get('cancel_url', 'https://www.google.com/?payment=cancelled&msg=Payment+was+cancelled')
         
         # Validate package
         if package_id not in CREDIT_PACKAGES:
