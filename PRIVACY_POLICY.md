@@ -1,8 +1,8 @@
 # Privacy Policy for Live Transcription Assistant
 
-**Last updated: September 2024**
+**Last updated: September 2025**
 
-## Overview
+## Overviewd
 
 Live Transcription Assistant ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our Chrome extension.
 

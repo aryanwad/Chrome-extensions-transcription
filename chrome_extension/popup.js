@@ -461,7 +461,16 @@ class PopupController {
         this.isTranscribing = false;
         this.updateUIForTranscription(false);
         this.showTranscriptionStatus('Transcription stopped', 'success');
-        
+
+        // Destroy overlay elements in content script to free memory
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+          if (tabs[0]) {
+            chrome.tabs.sendMessage(tabs[0].id, {
+              type: 'DESTROY_OVERLAY'
+            }).catch(() => {}); // Ignore errors if content script not loaded
+          }
+        });
+
         // Refresh credits balance
         setTimeout(() => this.loadCreditsBalance(), 1000);
       } else {

@@ -180,13 +180,18 @@ class TranscriptionOverlay {
           this.isTranscribing = false;
           this.hideStopButton();
           this.updateCaption('🔴 Transcription stopped', false);
-          // Hide overlay after showing stop message briefly
+          // Destroy overlay after showing stop message briefly to free memory
           setTimeout(() => {
-            this.forceHide();
-            
+            this.destroy();
+
           }, 2000);
           break;
-          
+
+        case 'DESTROY_OVERLAY':
+          // Immediately destroy overlay elements to free memory
+          this.destroy();
+          break;
+
         case 'AUDIO_CAPTURE_ERROR':
           // Remove debug logging
           this.isTranscribing = false;
@@ -548,18 +553,18 @@ class TranscriptionOverlay {
         this.hideStopButton();
         this.updateCaption('🛑 Transcription stopped successfully', false);
         
-        // Hide overlay after showing success message
+        // Destroy overlay elements to free memory after showing success message
         setTimeout(() => {
-          this.forceHide();
-          
+          this.destroy();
+
         }, 1500);
       } else {
         console.error('❌ CONTENT: Failed to stop transcription:', response?.error || 'Unknown error');
         this.updateCaption('❌ Failed to stop transcription', false);
         
-        // Still hide the overlay after error message
+        // Still destroy the overlay after error message to free memory
         setTimeout(() => {
-          this.forceHide();
+          this.destroy();
         }, 3000);
       }
       

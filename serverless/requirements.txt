@@ -1,3 +1,0 @@
-requests>=2.28.0
-yt-dlp>=2023.12.30
-assemblyai>=0.42.0

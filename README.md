@@ -98,9 +98,9 @@ native_messaging/
 
 ### Supporting Infrastructure
 ```
-aws_lambda/                   # Optional AWS Lambda deployment
-serverless/                  # Optional Vercel serverless functions  
-backend/                     # Legacy backend (unused in production)
+aws_backend/                  # AWS Lambda backend (current architecture)
+aws_lambda/                  # Legacy AWS deployment (unused)
+backend/                     # Legacy backend (unused)
 ```
 
 ## 🛠️ Technical Specifications
@@ -332,10 +332,10 @@ Maintains original audio quality for user experience while providing optimal for
 - Requires Python environment setup
 - Best performance and reliability
 
-### AWS Lambda Deployment
-- Optional serverless backend deployment
-- See `aws_lambda/DEPLOYMENT_GUIDE.md` for instructions
-- Alternative to Vercel serverless functions
+### AWS Lambda Backend
+- Current serverless backend architecture
+- See `aws_backend/README.md` for deployment instructions
+- Handles authentication, transcription, and AI processing
 
 ## 📚 Code Documentation
 

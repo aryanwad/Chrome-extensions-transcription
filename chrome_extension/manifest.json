@@ -10,8 +10,7 @@
     "scripting",
     "desktopCapture",
     "declarativeNetRequest",
-    "offscreen",
-    "nativeMessaging"
+    "offscreen"
   ],
   "host_permissions": [
     "https://*/*",
