@@ -358,10 +358,6 @@
     
     <!-- Dashboard Section (shown when logged in) -->
     <div id="dashboard-section" class="section hidden">
-      <div id="user-info" class="user-info">
-        <strong id="user-email"></strong>
-      </div>
-      
       <div class="credits-display">
         <div>💳 Credits Balance</div>
         <div class="credits-number" id="credits-balance">0</div>
@@ -421,53 +417,8 @@
       <div id="transcription-status" class="status hidden"></div>
       <button id="start-transcription" class="btn btn-success" disabled>Start Transcription</button>
       <button id="stop-transcription" class="btn btn-danger hidden">Stop Transcription</button>
-      <div class="small-text">
-        <p>1. Login above to get started</p>
-        <p>2. Make sure this tab has audio playing</p>
-        <p>3. ⚠️ Check "Share audio" when Chrome asks!</p>
-      </div>
     </div>
     
-    <div class="divider"></div>
-    
-    <!-- Catch-up Section -->
-    <div class="section">
-      <h3>⏪ Catch-up Summary</h3>
-      <div class="small-text">
-        <p>Get AI summary of past stream content</p>
-      </div>
-      <div id="catchup-status" class="status hidden"></div>
-      
-      <div class="form-group">
-        <label for="catchup-url">Stream URL</label>
-        <input type="text" id="catchup-url" placeholder="https://twitch.tv/username">
-      </div>
-      <div class="form-group">
-        <label for="catchup-duration">Duration</label>
-        <select id="catchup-duration" style="width: 100%; padding: 10px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: white; font-size: 14px;">
-          <option value="30">Last 30 minutes (300 credits)</option>
-          <option value="60">Last 60 minutes (600 credits)</option>
-        </select>
-      </div>
-      <button id="start-catchup" class="btn btn-primary">Get Summary</button>
-      
-      <div id="catchup-result" class="hidden" style="margin-top: 15px; padding: 15px; background: rgba(255, 255, 255, 0.1); border-radius: 8px; font-size: 13px; max-height: 300px; overflow-y: auto; white-space: pre-wrap;"></div>
-    </div>
-    
-    <div class="divider"></div>
-    
-    <!-- Info Section -->
-    <div class="section">
-      <h3>ℹ️ How it works</h3>
-      <div class="small-text">
-        <p>1. 🔐 Login with your account (no API keys needed!)</p>
-        <p>2. 🎵 Navigate to a page with audio/video</p>
-        <p>3. ▶️ Click "Start Transcription"</p>
-        <p>4. ⚠️ <strong>Check "Share audio"</strong> in Chrome dialog</p>
-        <p>5. 📱 Captions appear as overlay + Ask Agent button</p>
-        <p>6. ⚡ Use catch-up feature for past stream content</p>
-      </div>
-    </div>
   </div>
   
   <script src="popup.js"></script>

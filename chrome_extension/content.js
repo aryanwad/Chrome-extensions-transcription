@@ -97,11 +97,11 @@ class TranscriptionOverlay {
     this.agentButton.innerHTML = '🤖 Ask Agent';
     this.agentButton.onclick = () => this.showAgentDialog();
     
-    // Create Catch-Up button
+    // Create Catch-Up button (Coming Soon)
     this.catchupButton = document.createElement('button');
     this.catchupButton.className = 'lt-catchup-button';
     this.catchupButton.innerHTML = '⚡ Catch Up';
-    this.catchupButton.onclick = () => this.showCatchupDialog();
+    this.catchupButton.onclick = () => this.showComingSoonMessage();
     
     // Create Stop button
     this.stopButton = document.createElement('button');
@@ -575,7 +575,50 @@ class TranscriptionOverlay {
       }, 3000);
     }
   }
-  
+
+  showComingSoonMessage() {
+    // Create simple coming soon dialog
+    const comingSoonDialog = document.createElement('div');
+    comingSoonDialog.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: rgba(0, 0, 0, 0.8) !important;
+      z-index: 2147483648 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-family: 'Segoe UI', Arial, sans-serif !important;
+    `;
+
+    comingSoonDialog.innerHTML = `
+      <div style="background: white; padding: 40px; border-radius: 20px; text-align: center; max-width: 400px; margin: 20px;">
+        <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">⚡ Catch-Up Feature</h2>
+        <div style="font-size: 48px; margin: 20px 0;">🚧</div>
+        <h3 style="margin: 0 0 15px 0; color: #666; font-size: 18px;">COMING SOON</h3>
+        <p style="margin: 0 0 25px 0; color: #888; line-height: 1.5;">
+          AI-powered stream summaries with key moments and deep links are coming in a future update!
+        </p>
+        <button onclick="this.parentElement.parentElement.remove()" style="
+          background: #667eea;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: background 0.2s;
+        " onmouseover="this.style.background='#5a67d8'" onmouseout="this.style.background='#667eea'">
+          Got it!
+        </button>
+      </div>
+    `;
+
+    document.body.appendChild(comingSoonDialog);
+  }
+
   showCatchupDialog() {
     if (this.catchupDialog) {
       this.catchupDialog.remove();
