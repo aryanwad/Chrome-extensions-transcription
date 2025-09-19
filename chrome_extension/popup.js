@@ -324,6 +324,13 @@ class PopupController {
         this.showTranscriptionStatus('Please login first', 'error');
         return;
       }
+
+      // Show audio capture consent dialog first
+      const userConsented = await this.showAudioCaptureConsent();
+      if (!userConsented) {
+        this.showTranscriptionStatus('Audio capture permission required for transcription', 'warning');
+        return;
+      }
       
       // Check credits balance (skip for admin users)
       await this.loadCreditsBalance();
@@ -626,10 +633,118 @@ class PopupController {
     this.elements.transcriptionStatus.textContent = message;
     this.elements.transcriptionStatus.className = `status ${type}`;
     this.elements.transcriptionStatus.classList.remove('hidden');
-    
+
     setTimeout(() => {
       this.elements.transcriptionStatus.classList.add('hidden');
     }, 5000);
+  }
+
+  async showAudioCaptureConsent() {
+    return new Promise((resolve) => {
+      // Check if user has already granted permission (stored preference)
+      chrome.storage.local.get(['audioConsentGranted'], (result) => {
+        if (result.audioConsentGranted) {
+          resolve(true);
+          return;
+        }
+
+        // Create consent dialog
+        const consentDialog = document.createElement('div');
+        consentDialog.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.8);
+          z-index: 10000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        `;
+
+        consentDialog.innerHTML = `
+          <div style="
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 400px;
+            margin: 20px;
+            color: #333;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+          ">
+            <h2 style="margin: 0 0 20px 0; color: #667eea; font-size: 20px;">
+              🎙️ Audio Capture Permission
+            </h2>
+            <p style="margin: 0 0 20px 0; line-height: 1.5; color: #666;">
+              We need to capture audio from this browser tab to provide live transcription captions.
+            </p>
+            <div style="background: #f8f9ff; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: left;">
+              <div style="font-size: 14px; line-height: 1.5; color: #555;">
+                <div style="margin-bottom: 8px;">✓ Audio stays on your device during processing</div>
+                <div style="margin-bottom: 8px;">✓ Only captures the current browser tab</div>
+                <div style="margin-bottom: 0;">✓ Audio is not stored or recorded permanently</div>
+              </div>
+            </div>
+            <p style="margin: 0 0 25px 0; font-size: 14px; color: #888;">
+              Chrome will ask for permission next. Please click <strong>"Share"</strong> and make sure <strong>"Share audio"</strong> is checked.
+            </p>
+            <div style="display: flex; gap: 10px;">
+              <button id="consent-allow" style="
+                flex: 1;
+                background: #667eea;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.2s;
+              ">Allow & Continue</button>
+              <button id="consent-deny" style="
+                flex: 1;
+                background: #e5e7eb;
+                color: #374151;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+              ">Cancel</button>
+            </div>
+          </div>
+        `;
+
+        // Add hover effects
+        const allowBtn = consentDialog.querySelector('#consent-allow');
+        const denyBtn = consentDialog.querySelector('#consent-deny');
+
+        allowBtn.addEventListener('mouseenter', () => allowBtn.style.background = '#5a67d8');
+        allowBtn.addEventListener('mouseleave', () => allowBtn.style.background = '#667eea');
+        denyBtn.addEventListener('mouseenter', () => denyBtn.style.background = '#d1d5db');
+        denyBtn.addEventListener('mouseleave', () => denyBtn.style.background = '#e5e7eb');
+
+        // Add event listeners
+        allowBtn.addEventListener('click', () => {
+          // Store user consent
+          chrome.storage.local.set({ audioConsentGranted: true });
+          consentDialog.remove();
+          resolve(true);
+        });
+
+        denyBtn.addEventListener('click', () => {
+          consentDialog.remove();
+          resolve(false);
+        });
+
+        // Add to popup
+        document.body.appendChild(consentDialog);
+      });
+    });
   }
   
   

@@ -123,7 +123,6 @@ For privacy-related questions or concerns:
 ## Legal Compliance
 
 This Privacy Policy complies with:
-- California Consumer Privacy Act (CCPA)
 - General Data Protection Regulation (GDPR)
 - Chrome Web Store Privacy Requirements
 

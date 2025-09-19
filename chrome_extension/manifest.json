@@ -13,14 +13,13 @@
     "offscreen"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*",
     "https://streaming.assemblyai.com/*",
     "https://api.assemblyai.com/*",
     "https://api.openai.com/*",
     "https://id.twitch.tv/*",
     "https://api.twitch.tv/*",
     "https://usher.ttvnw.net/*",
+    "https://gql.twitch.tv/*",
     "https://gak2qkt4df.execute-api.us-east-1.amazonaws.com/*"
   ],
   "background": {
@@ -65,5 +64,8 @@
         "<all_urls>"
       ]
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }
